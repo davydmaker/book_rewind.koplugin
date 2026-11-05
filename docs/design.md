@@ -8,7 +8,8 @@ A year of reading as a set of cards, in the style of a yearly recap, generated o
 - It lives in the Tools menu, as **Book Rewind**. It opens on the most recent year with at least 10 minutes of reading, and the cover offers the neighbouring years that also reach that minimum. In the first 30 days of a year, it opens on the year that just ended, if that year reaches the minimum, and the new year stays on the button.
 - A tap on the right or a swipe moves forward. A tap on the left third moves back. On devices with keys, the page keys navigate and the back key closes; changing the year and saving images need touch.
 - It reads `koreader/settings/statistics.sqlite3` read-only. With a book open, it first writes the pages the statistics plugin still keeps in memory.
-- **Save Images**, on the summary card, writes one PNG per card to KOReader's screenshots folder, without the buttons.
+- **Save Images**, on the summary card, writes one PNG per card to KOReader's screenshots folder, without the buttons. After a save with every card written, it removes the images of that year left by an older save with more cards, and only files named `book_rewind_<year>_<number>.png`.
+- If the screen cannot open, KOReader shows a short notice and the rotation is restored. If one card cannot be drawn, it shows a message in its place, and the other cards stay reachable. Both go to the KOReader log.
 - If no year has 10 minutes of reading, it shows an invitation to read more, with the minutes still missing, instead of the cards. A missing or unreadable database counts as no reading.
 - If the current year does not have 10 minutes yet, the cover of the most recent year says how many minutes are missing. That notice stays out of the saved images.
 - Each card only appears when there is data for it, so a short history still makes a coherent sequence.
@@ -26,12 +27,12 @@ Rare cards in `wildcards.lua`, with their content in `wildcard_cards.lua` and th
 | Comeback | The longest pause inside the year has 30 days or more | 120 days |
 | Back after years | At least a year without reading before this year, with at least 10 minutes in the last year read | Always 2 |
 | Waves | 3 or more pauses longer than two weeks | 8 returns |
-| The book that waited | A finished book stopped for 30 days or more | 180 days |
-| Couldn't put it down | A whole book, with 30 pages or more, in a single day | 300 pages |
-| Slow burn | A finished book that took 90 days or more | 240 days |
-| Reread | At least 90% of a book finished in an earlier year read again | Fixed at 1.7 |
+| The book that waited | A finished book stopped for 30 days or more before reaching the end. The page where it stopped is in the book's own pagination | 180 days |
+| Couldn't put it down | A whole book, with 30 pages or more, started and read to the end on the same day | 300 pages |
+| Slow burn | A finished book that took 90 days or more to reach the end | 240 days |
+| Reread | At least 90% of a book finished in an earlier year read again. The count of readings walks the earlier history in time order: each time it covers 90% of the book is one reading, and the next one starts from zero | Fixed at 1.7 |
 | Series run | 3 or more finished books of the same series. The `series` metadata comes first, then a volume in the title (`Vol`, `Volume`, `Livro`, `Book` or `Tomo`, with an arabic or roman number), `[Name 2]` or a final roman numeral after at least two words, then the same author with titles sharing a final parenthesis or the same two opening words. Numbers, two very short words and generic openings such as `Curso de` do not count. The name is the longest opening those titles share | 6 books |
-| Juggler | 3 or more books open at once. A pause over two weeks closes a book for this count | 8 books |
+| Juggler | 3 or more books open at once. A pause over two weeks closes a book for this count, and so does reaching the end | 8 books |
 | So close | A closed year with a book stopped between 70% and 90%, not read in later years | 90% |
 | Shortest to longest | A finished book at least 3 times longer than another | 15 times |
 | Most marked | A finished book with 10 highlights or more. The `highlights` and `notes` fields are totals for the book, not per year | 100 highlights |
@@ -59,6 +60,8 @@ A black and white print language, with halftone, hatching and speed lines. The d
 - **Pages:** the count uses the part of the book each page covers. The same passage counts once, even when read again at another font size.
 - **Opened book:** at least 1 minute in the year, which keeps files opened by mistake out of the lists.
 - **Read to the end:** counts in the year the history reaches 90% of the book, even if the last pages took less than 1 minute. In another year, it only counts again if 90% of the book is read again in that year; if it is only reopened, it appears on the shelf as "finished before". It does not use the book status in `.sdr` files, so a book marked as finished without being read does not count.
+- **When a book was finished:** the moment it reaches 90%. Opening it again later, to look something up, does not change that day, so the timeline, the devoured book, the slow burn, the book that waited, a book in one day and the series run all use it. The time a book took counts until the end of the day it was finished.
+- **Biggest day:** its pages follow the same rule as the pages of the year. For a book with no page count, the pages of that day's rows are the reference.
 - **Titles:** the cards drop what the file carries besides the title: site marks such as `[e-Livros]`, tags such as `(Portuguese Edition)` and `(Oficial)`, `Microsoft Word - `, file extensions, websites at the edges of the title and the author repeated at its start. Underscores become spaces in titles that look like file names. Cover lookups still use the title as stored.
 - **Authors:** co-authors count separately, including `;`, `&`, `and`, `with` and commas between full names. `Last, First` and names like `Cruz e Sousa` stay whole. Dates after the name are dropped, and a shorter name of at least two words inside a single longer one counts as the same person. Generic labels (`N/A`, `Unknown`, `Windows User`, `Vários Autores`), program names (`Digital Source`, `PDFCreator`), websites and names with up to 2 letters are ignored. PDFs often carry the account that made the file in this field, and that cannot be told apart from a real name. Spellings such as `J.R.R. Tolkien` and `Tolkien, J. R. R.` count as the same person.
 - **Previous year:** a year in progress is compared with the same period of the previous year. A closed year is compared with the whole previous year.
@@ -75,8 +78,8 @@ A black and white print language, with halftone, hatching and speed lines. The d
   | Explorer | Effective number of authors | 5 | 15 |
 
   The three time-based habits need at least 7 days of reading, because a few days do not show a habit. The effective number of authors considers those with at least 30 minutes in the year and weighs them by time: 3 equal authors give 3, and one dominant author gives close to 1. The concentration used by Loyal Reader is the inverse of that number.
-- **Devoured book:** the one with the fewest days between first and last reading, started and finished in the year, with at least 30 pages.
-- **Covers:** they come from the Cover browser cache (`bookinfo_cache.sqlite3`), looked up by title and author. A book with no cached cover gets one generated by `ui/generated_cover.lua`, with the title on top and the author at the bottom. The style comes from the title, so it is always the same for each book, and a long title shrinks or gets clipped to stay above the drawing. Each cover is built once per opened year and released when changing the year or closing.
+- **Devoured book:** the one with the fewest days between the first reading and the day it was finished, started and finished in the year, with at least 30 pages.
+- **Covers:** they come from the Cover browser cache (`bookinfo_cache.sqlite3`), looked up by title and author. The title alone is enough only when a single book in the cache has it, so a common title such as "Poemas" does not bring the cover of another book. The cache has no index on titles, so they are read once per year and each cover is then read by its row. A cover whose size does not match its pixels is refused. A book with no cached cover gets one generated by `ui/generated_cover.lua`, with the title on top and the first author the cards accept at the bottom, so labels such as "Windows User" never get printed. The style comes from the title, so it is always the same for each book, and a long title shrinks or gets clipped to stay above the drawing. Each cover is built once per opened year and released when changing the year or closing.
 
 ## Limits
 

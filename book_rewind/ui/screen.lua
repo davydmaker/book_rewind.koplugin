@@ -12,6 +12,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local RenderImage = require("ui/renderimage")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local util = require("util")
@@ -46,6 +47,19 @@ function Screen:init()
         self.restore_rotation = rotation
         Device_screen:setRotationMode(Device_screen.DEVICE_ROTATED_UPRIGHT)
     end
+    -- A failure past this point must not leave the screen rotated.
+    local ok, err = pcall(self.setup, self)
+    if not ok then
+        self:free_covers()
+        if self.restore_rotation then
+            Device_screen:setRotationMode(self.restore_rotation)
+            self.restore_rotation = nil
+        end
+        error(err, 0)
+    end
+end
+
+function Screen:setup()
     self.dimen = Geom:new{ x = 0, y = 0, w = Device_screen:getWidth(), h = Device_screen:getHeight() }
     self.width, self.height = self.dimen.w, self.dimen.h
     self.language = self.language or I18n.language_from(G_reader_settings and G_reader_settings:readSetting("language"))
@@ -105,6 +119,7 @@ function Screen:open_year(year)
         last_read_before = data.last_read_before,
         last_year_seconds = data.last_year_seconds,
         previous_seconds = data.previous_seconds,
+        earlier_history = function(book_id) return Store.book_history(self.db_path, book_id, year) end,
         now = self.now,
     }
     if not self.metrics or self.metrics.total_seconds < Cards.MIN_SECONDS then
@@ -158,7 +173,8 @@ function Screen:load_cover(book_id, max_w, max_h)
     if not display_title then
         return nil
     end
-    local ok, cover = pcall(Store.load_cover, self.covers_db, book.title, book.authors)
+    local reader = self:cover_reader()
+    local ok, cover = pcall(function() return reader and reader:load(book.title, book.authors) end)
     if not ok or not cover then
         return GeneratedCover.draw(display_title, book.authors, max_w, max_h)
     end
@@ -186,13 +202,25 @@ function Screen:cached_cover(book_id, max_w, max_h)
     end
 end
 
+-- The cover cache is opened on the first cover of a year, and closed with the covers.
+function Screen:cover_reader()
+    if self.covers_reader == nil then
+        self.covers_reader = Store.open_covers(self.covers_db) or false
+    end
+    return self.covers_reader or nil
+end
+
 function Screen:free_covers()
-    for _, entry in pairs(self.covers) do
+    for _, entry in pairs(self.covers or {}) do
         if entry then
             entry.cover:free()
         end
     end
     self.covers = {}
+    if self.covers_reader then
+        self.covers_reader:close()
+    end
+    self.covers_reader = nil
 end
 
 function Screen:show_empty(year, seconds)
@@ -254,15 +282,28 @@ function Screen:paintTo(bb, x, y)
         return
     end
     self.dimen.x, self.dimen.y = x, y
-    self.overflow = CardView.paint(bb, self.cards[self.index], {
+    local card = self.cards[self.index]
+    local options = {
         width = self.width,
         height = self.height,
         strings = self.strings,
-        footer = self.cards[self.index].id == "summary" and self.export_footer or self:footer(self.index),
+        footer = card.id == "summary" and self.export_footer or self:footer(self.index),
         button_labels = { export = self.export_label },
         cover = self.cover_provider,
         plugin_dir = PLUGIN_DIR,
-    })
+    }
+    local ok, overflow = pcall(CardView.paint, bb, card, options)
+    if ok then
+        self.overflow = overflow
+        return
+    end
+    -- One card that cannot be drawn does not take the others with it: it says so, and the navigation goes on.
+    logger.warn("Book Rewind: could not draw the card", card.id, overflow)
+    self.overflow = false
+    local drawn, err = pcall(CardView.paint_error, bb, options)
+    if not drawn then
+        logger.warn("Book Rewind: could not draw the error card", err)
+    end
 end
 
 function Screen:go(delta)
@@ -316,21 +357,46 @@ function Screen:export_images()
     util.makePath(dir)
     self.export_dir = dir
     local bb = Blitbuffer.new(self.width, self.height, Blitbuffer.TYPE_BB8)
-    local saved = 0
+    local saved, expected, written = 0, 0, {}
     for index, card in ipairs(self.cards) do
         if not card.not_exported then
-            local path = string.format("%s/book_rewind_%d_%02d.png", dir, self.year, index)
+            expected = expected + 1
+            local name = string.format("book_rewind_%d_%02d.png", self.year, index)
             local ok = pcall(function()
                 CardView.paint(bb, card, { width = self.width, height = self.height, strings = self.strings, plugin_dir = PLUGIN_DIR, export = true, cover = self.cover_provider })
-                bb:writePNG(path)
+                bb:writePNG(dir .. "/" .. name)
             end)
             if ok then
                 saved = saved + 1
+                written[name] = true
             end
         end
     end
     bb:free()
+    -- Only after a complete save, so a failure never leaves the year with fewer images than before.
+    if saved == expected then
+        local ok, err = pcall(self.remove_stale_images, self, dir, written)
+        if not ok then
+            logger.warn("Book Rewind: could not remove older images", err)
+        end
+    end
     return saved
+end
+
+-- A year that now has fewer cards would keep the last images of an older save, mixed with the new ones.
+-- Only this plugin's names for this year are touched: book_rewind_<year>_<number>.png.
+function Screen:remove_stale_images(dir, written)
+    local lfs = require("libs/libkoreader-lfs")
+    local prefix = string.format("book_rewind_%d_", self.year)
+    local stale = {}
+    for name in lfs.dir(dir) do
+        if not written[name] and name:sub(1, #prefix) == prefix and name:sub(#prefix + 1):match("^%d%d+%.png$") then
+            stale[#stale + 1] = name
+        end
+    end
+    for _, name in ipairs(stale) do
+        os.remove(dir .. "/" .. name)
+    end
 end
 
 local function inside(rect, pos)

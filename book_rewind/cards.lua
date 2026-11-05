@@ -168,9 +168,9 @@ function Cards.build(metrics, opts)
         for i, book in ipairs(metrics.finished_books) do
             finished[i] = book
         end
-        table.sort(finished, function(a, b) return a.last_time < b.last_time end)
+        table.sort(finished, function(a, b) return a.finish_time < b.finish_time end)
         for _, book in ipairs(finished) do
-            table.insert(by_month[book.last_month], book)
+            table.insert(by_month[book.finish_month], book)
         end
         add{
             id = "timeline",

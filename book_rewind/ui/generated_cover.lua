@@ -83,8 +83,9 @@ function GeneratedCover.draw(title, authors, max_w, max_h)
     end
     box:paintTo(cover, px(32), px(56))
     box:free()
-    local author = type(authors) == "string" and authors:match("^[^\n]+")
-    if Stats.clean_title(author) then
+    -- The same authors the cards accept, so "Windows User" and the like never get printed.
+    local author = Stats.split_authors(authors)[1]
+    if author then
         local author_box = text_box(Cards.clip(author, LONGEST_AUTHOR), "noto/NotoSerif-Italic.ttf", 15)
         author_box:paintTo(cover, px(32), px(385))
         author_box:free()

@@ -5,6 +5,8 @@ local function plural(count, one, many)
 end
 
 I18n.pt = {
+    open_failed = "Não foi possível abrir o Book Rewind. Os detalhes estão no registro do KOReader.",
+    card_failed = "Não foi possível desenhar este cartão. Os outros continuam aqui: toque para seguir.",
     menu = "Book Rewind",
     thousands = ".", decimal = ",",
     months = { "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro" },
@@ -182,6 +184,8 @@ I18n.pt = {
 }
 
 I18n.en = {
+    open_failed = "Book Rewind could not open. The details are in the KOReader log.",
+    card_failed = "This card could not be drawn. The others are still here: tap to go on.",
     menu = "Book Rewind",
     thousands = ",", decimal = ".",
     months = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" },
@@ -362,6 +366,8 @@ I18n.en = {
 }
 
 I18n.es = {
+    open_failed = "No se pudo abrir Book Rewind. Los detalles están en el registro de KOReader.",
+    card_failed = "No se pudo dibujar esta tarjeta. Las demás siguen aquí: toca para continuar.",
     menu = "Book Rewind",
     thousands = ".", decimal = ",",
     months = { "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre" },

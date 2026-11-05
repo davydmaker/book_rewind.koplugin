@@ -118,7 +118,7 @@ end
 
 function Detect.one_sitting(metrics)
     local book = best_book(metrics, function(candidate)
-        return candidate.finished and not candidate.started_before_year and candidate.first_yday == candidate.last_yday and candidate.total_pages >= MIN_BOOK_PAGES
+        return candidate.finished and not candidate.started_before_year and candidate.first_yday == candidate.finish_yday and candidate.total_pages >= MIN_BOOK_PAGES
     end, function(a, b) return a.total_pages > b.total_pages end)
     if not book then
         return nil
@@ -128,7 +128,7 @@ end
 
 function Detect.slow_burn(metrics)
     local function span(book)
-        return book.last_yday - book.first_yday + 1
+        return book.finish_yday - book.first_yday + 1
     end
     local book = best_book(metrics, function(candidate)
         return candidate.finished and not candidate.started_before_year and span(candidate) >= SLOW_BURN_DAYS
@@ -355,13 +355,14 @@ function Detect.series_run(metrics)
     table.sort(best.books, function(a, b) return a.first_time < b.first_time end)
     local in_a_row = true
     for i = 2, #best.books do
-        if best.books[i].first_time < best.books[i - 1].last_time then
+        if best.books[i].first_time < best.books[i - 1].finish_time then
             in_a_row = false
         end
     end
-    local ids = {}
+    local ids, last_finish = {}, 0
     for i, book in ipairs(best.books) do
         ids[i] = book.id
+        last_finish = math.max(last_finish, book.finish_yday)
     end
     return {
         score = strength(#best.books, 3, 6),
@@ -370,7 +371,7 @@ function Detect.series_run(metrics)
             name = best.name,
             books = best.books,
             in_a_row = in_a_row,
-            days = best.books[#best.books].last_yday - best.books[1].first_yday + 1,
+            days = last_finish - best.books[1].first_yday + 1,
         },
     }
 end
