@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.1]
 
 - A book opened again after it was finished keeps the day it reached the end. Before, looking something up months later moved it in the timeline, made the devoured book take longer, and could create a slow burn or a book that waited.
 - A book read in a single day and opened again later can now be the book read in one day.
