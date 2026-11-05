@@ -255,25 +255,60 @@ local function filled(first, last)
 end
 
 -- Marks the part of the book a page covers, so the same passage read at another font size counts once.
-local function mark_page(marks, page, total)
+-- Returns how many steps are new, and how many of those are not in other either.
+local function mark_page(marks, page, total, other)
     if page < 1 or total <= 0 then
-        return
+        return 0, 0
     end
     local first = math.floor((page - 1) * COVERAGE_STEPS / total) + 1
     local last = math.max(first, math.floor(page * COVERAGE_STEPS / total))
+    local added, beyond = 0, 0
     for step = first, math.min(last, COVERAGE_STEPS) do
-        marks[step] = true
-    end
-end
-
-local function covered_share(marks, other)
-    local steps = 0
-    for step = 1, COVERAGE_STEPS do
-        if marks[step] or (other and other[step]) then
-            steps = steps + 1
+        if not marks[step] then
+            marks[step] = true
+            added = added + 1
+            if not (other and other[step]) then
+                beyond = beyond + 1
+            end
         end
     end
-    return steps / COVERAGE_STEPS
+    return added, beyond
+end
+
+local function reached(steps)
+    return steps / COVERAGE_STEPS >= FINISHED_FRACTION
+end
+
+-- A page number in the pagination of the book, since the font size changes how many pages it has.
+local function reference_page(page, total, page_count)
+    if page_count > 0 and total and total > 0 then
+        return math.max(1, math.floor(page * page_count / total + 0.5))
+    end
+    return page
+end
+
+-- Turns rows of { book, start, duration, page, total_pages } into the columns Stats.compute reads.
+function Stats.columns(rows)
+    local columns = { book = {}, start = {}, duration = {}, page = {}, total = {} }
+    for i, row in ipairs(rows) do
+        columns.book[i], columns.start[i], columns.duration[i] = row[1], row[2], row[3]
+        columns.page[i], columns.total[i] = row[4], row[5]
+    end
+    return columns
+end
+
+-- How many times a book was read to the end, from its pages in time order, each as { page, total_pages }.
+-- Each pass that reaches the end starts the next one from zero.
+function Stats.count_passes(history)
+    local marks, steps, passes = {}, 0, 0
+    for _, row in ipairs(history) do
+        steps = steps + mark_page(marks, row[1], row[2])
+        if reached(steps) then
+            passes = passes + 1
+            marks, steps = {}, 0
+        end
+    end
+    return passes
 end
 
 local function days_elapsed(year, now)
@@ -284,10 +319,13 @@ local function days_elapsed(year, now)
     return os.date("*t", os.time{ year = year, month = 12, day = 31, hour = 12 }).yday
 end
 
--- opts.rows must be ordered by start_time. Each row is { book, start, duration, page, total_pages }.
+-- opts.rows holds the reading of the year in columns (see Stats.columns), ordered by start time.
 -- opts.earlier_pages has the pages of these books read before the year, each as { book, page, total_pages }.
+-- opts.earlier_history(book), when given, returns the earlier pages of a reread book in time order, as Stats.count_passes reads them.
 function Stats.compute(opts)
     local year, books = opts.year, opts.books
+    local rows = opts.rows
+    local row_book, row_start, row_duration, row_page, row_total = rows.book, rows.start, rows.duration, rows.page, rows.total
     local result = {
         year = year,
         total_seconds = 0,
@@ -328,8 +366,22 @@ function Stats.compute(opts)
         end
     end
 
-    for _, row in ipairs(opts.rows) do
-        local book, start, duration = row[1], row[2], row[3]
+    local earlier_marks, earlier_steps = {}, {}
+    for _, row in ipairs(opts.earlier_pages or {}) do
+        local id = row[1]
+        local marks = earlier_marks[id]
+        if not marks then
+            marks = {}
+            earlier_marks[id] = marks
+        end
+        earlier_steps[id] = (earlier_steps[id] or 0) + mark_page(marks, row[2], row[3])
+    end
+
+    -- How far each book got, to know the moment it reached the end: after that, opening it again
+    -- to look something up does not change when it was finished, nor how long it took.
+    local progress = {}
+    for i = 1, #row_start do
+        local book, start, duration, page, total = row_book[i], row_start[i], row_duration[i], row_page[i], row_total[i]
         local parts = date_parts(cache, start)
         if parts.year == year then
             result.total_seconds = result.total_seconds + duration
@@ -341,19 +393,34 @@ function Stats.compute(opts)
             if not book_first[book] then
                 book_first[book] = start
                 year_marks[book] = {}
+                local before = earlier_steps[book] or 0
+                -- A book already read to the end before the year is finished again only by reading it all again.
+                progress[book] = { year_steps = 0, all_steps = before, reread = reached(before), seconds = 0 }
             end
             book_last[book] = start
-            mark_page(year_marks[book], row[4], row[5])
             first_book_by_day[parts.yday] = first_book_by_day[parts.yday] or book
+
+            local state = progress[book]
+            local done_before = state.finish_time ~= nil
+            local added, beyond = mark_page(year_marks[book], page, total, earlier_marks[book])
+            state.year_steps = state.year_steps + added
+            state.all_steps = state.all_steps + beyond
+            state.seconds = state.seconds + duration
+            if not done_before and reached(state.reread and state.year_steps or state.all_steps) then
+                state.finish_time, state.finish_yday, state.finish_seconds = start, parts.yday, state.seconds
+            elseif done_before and parts.yday == state.finish_yday then
+                -- The last pages after the 90% mark, read on the same day, are part of the time it took.
+                state.finish_seconds = state.finish_seconds + duration
+            end
 
             local track = tracks[book]
             if not track then
-                track = { rows = 0, segments = { { from = parts.yday, to = parts.yday } } }
+                track = { segments = { { from = parts.yday, to = parts.yday } } }
                 tracks[book] = track
-            elseif parts.yday ~= track.last_yday then
+            elseif parts.yday ~= track.last_yday and not done_before then
                 local gap = parts.yday - track.last_yday - 1
                 if gap > 0 and (not track.pause or gap > track.pause.days) then
-                    track.pause = { days = gap, page = track.last_page, from = track.last_yday, to = parts.yday }
+                    track.pause = { days = gap, page = track.last_page, total = track.last_total, from = track.last_yday, to = parts.yday }
                 end
                 if gap > SEGMENT_GAP_DAYS then
                     track.segments[#track.segments + 1] = { from = parts.yday, to = parts.yday }
@@ -361,8 +428,9 @@ function Stats.compute(opts)
                     track.segments[#track.segments].to = parts.yday
                 end
             end
-            track.rows = track.rows + 1
-            track.last_yday, track.last_page = parts.yday, row[4]
+            if not done_before then
+                track.last_yday, track.last_page, track.last_total = parts.yday, page, total
+            end
 
             if not last_end or start - last_end > SESSION_GAP then
                 close_session()
@@ -377,16 +445,6 @@ function Stats.compute(opts)
     end
     close_session()
     result.longest_session = longest
-
-    local earlier_marks = {}
-    for _, row in ipairs(opts.earlier_pages or {}) do
-        local marks = earlier_marks[row[1]]
-        if not marks then
-            marks = {}
-            earlier_marks[row[1]] = marks
-        end
-        mark_page(marks, row[2], row[3])
-    end
 
     table.sort(session_lengths, function(a, b) return a > b end)
     local top_sum = 0
@@ -412,21 +470,23 @@ function Stats.compute(opts)
         end
     end
     if best_day.yday then
-        local day_seconds, day_pages = {}, {}
-        for _, row in ipairs(opts.rows) do
-            local parts = date_parts(cache, row[2])
+        -- Pages of the day follow the same rule as the pages of the year.
+        local day_seconds, day_marks, day_steps, day_total = {}, {}, {}, {}
+        for i = 1, #row_start do
+            local parts = date_parts(cache, row_start[i])
             if parts.year == year and parts.yday == best_day.yday then
-                day_seconds[row[1]] = (day_seconds[row[1]] or 0) + row[3]
-                day_pages[row[1]] = day_pages[row[1]] or {}
-                day_pages[row[1]][row[4]] = true
+                local id = row_book[i]
+                day_seconds[id] = (day_seconds[id] or 0) + row_duration[i]
+                day_marks[id] = day_marks[id] or {}
+                day_steps[id] = (day_steps[id] or 0) + mark_page(day_marks[id], row_page[i], row_total[i])
+                day_total[id] = math.max(day_total[id] or 0, row_total[i])
             end
         end
         local most = ranked(day_seconds)[1]
+        local book = books[most.key] or {}
+        local page_count = (book.pages and book.pages > 0) and book.pages or day_total[most.key]
         best_day.book_id = most.key
-        best_day.pages = 0
-        for _ in pairs(day_pages[most.key]) do
-            best_day.pages = best_day.pages + 1
-        end
+        best_day.pages = math.floor(day_steps[most.key] / COVERAGE_STEPS * page_count + 0.5)
     end
     result.days = days
     result.day_list = yday_list
@@ -434,7 +494,7 @@ function Stats.compute(opts)
     result.session_hours = session_hours
     result.past_midnight = midnight
     result.year_closed = os.date("*t", opts.now or os.time()).year > year
-    result.first_read = opts.rows[1] and opts.rows[1][2] or nil
+    result.first_read = row_start[1]
     result.last_read_before = opts.last_read_before
     result.last_year_seconds = opts.last_year_seconds
     result.longest_streak_end = best_streak_end
@@ -474,18 +534,22 @@ function Stats.compute(opts)
         local id, seconds = entry.key, entry.seconds
         local book = books[id] or {}
         local page_count = (book.pages and book.pages > 0) and book.pages or 0
-        local this_year = covered_share(year_marks[id])
-        local read = math.floor(this_year * page_count + 0.5)
+        local state = progress[id]
+        local read = math.floor(state.year_steps / COVERAGE_STEPS * page_count + 0.5)
         total_pages = total_pages + read
         local earlier = earlier_marks[id]
-        local before = earlier and covered_share(earlier) or 0
-        local reached_end = covered_share(year_marks[id], earlier) >= FINISHED_FRACTION
+        local done_before = state.reread
+        -- Finished in the year it reached the end, or in a later year when read again from start to end.
+        local finished = state.finish_time ~= nil
         -- The last pages of a book started in another year count, however quick they were.
-        local completed_now = earlier ~= nil and before < FINISHED_FRACTION and reached_end
+        local completed_now = earlier ~= nil and not done_before and finished
         if seconds >= MIN_BOOK_SECONDS or completed_now then
-            -- Finished in the year it reached the end, or in a later year when read again from start to end.
-            local finished = reached_end and (before < FINISHED_FRACTION or this_year >= FINISHED_FRACTION)
             local first_date, last_date = date_parts(cache, book_first[id]), date_parts(cache, book_last[id])
+            local finish_date = finished and date_parts(cache, state.finish_time) or nil
+            local pause = tracks[id].pause
+            if pause then
+                pause.page = reference_page(pause.page, pause.total, page_count)
+            end
             local info = {
                 id = id,
                 title = Stats.clean_title(book.title, book.authors),
@@ -493,27 +557,35 @@ function Stats.compute(opts)
                 pages = read,
                 total_pages = page_count,
                 finished = finished,
-                finished_earlier = not finished and before >= FINISHED_FRACTION,
-                reread = finished and before >= FINISHED_FRACTION,
-                overall = covered_share(year_marks[id], earlier),
+                finished_earlier = not finished and done_before,
+                reread = finished and done_before,
+                overall = state.all_steps / COVERAGE_STEPS,
                 read_later = opts.read_later and opts.read_later[id] or false,
                 series = known_title(book.series) and (book.series:gsub("%s*#[%d%.]+%s*$", "")) or nil,
                 highlights = book.highlights or 0,
                 notes = book.notes or 0,
-                pause = tracks[id].pause,
+                pause = pause,
                 segments = tracks[id].segments,
                 first_time = book_first[id],
                 authors = book.authors,
                 first_yday = first_date.yday,
                 last_yday = last_date.yday,
-                last_month = last_date.month,
                 last_time = book_last[id],
+                -- When it reached the end, and the time it took until the end of that day.
+                finish_time = state.finish_time,
+                finish_yday = finish_date and finish_date.yday,
+                finish_month = finish_date and finish_date.month,
+                finish_seconds = state.finish_seconds,
                 started_before_year = earlier ~= nil,
             }
-            if info.reread and opts.earlier_reads and opts.earlier_reads[id] then
-                local reads = opts.earlier_reads[id]
-                info.first_read_year = os.date("*t", reads.first).year
-                info.read_count = math.max(2, math.floor((reads.rows + tracks[id].rows) / math.max(page_count, 1) + 0.5))
+            if info.reread then
+                local reads = opts.earlier_reads and opts.earlier_reads[id]
+                if reads then
+                    info.first_read_year = os.date("*t", reads.first).year
+                end
+                local history = opts.earlier_history and opts.earlier_history(id)
+                -- Earlier passes, at least one since it was finished before, plus this one.
+                info.read_count = math.max(1, history and Stats.count_passes(history) or 0) + 1
             end
             result.books[#result.books + 1] = info
             by_id[id] = info
@@ -535,7 +607,7 @@ function Stats.compute(opts)
     -- The fastest book read from start to end inside this year. Very short files would always win.
     for _, book in ipairs(result.finished_books) do
         if not book.started_before_year and book.total_pages >= DEVOURED_MIN_PAGES then
-            local days_taken = book.last_yday - book.first_yday + 1
+            local days_taken = book.finish_yday - book.first_yday + 1
             local best = result.devoured
             if not best or days_taken < best.days or (days_taken == best.days and book.total_pages > best.book.total_pages) then
                 result.devoured = { book = book, days = days_taken, pages_per_day = math.floor(book.total_pages / days_taken + 0.5) }
@@ -554,12 +626,17 @@ function Stats.compute(opts)
         end
         return set, count
     end
+    local word_sets = {}
+    for key in pairs(author_seconds) do
+        local set, count = word_set(key)
+        word_sets[key] = { set = set, count = count }
+    end
     for short in pairs(author_seconds) do
-        local short_set, short_count = word_set(short)
+        local short_set, short_count = word_sets[short].set, word_sets[short].count
         local target, matches = nil, 0
         if short_count >= 2 then
             for long in pairs(author_seconds) do
-                local long_set, long_count = word_set(long)
+                local long_set, long_count = word_sets[long].set, word_sets[long].count
                 if long_count > short_count then
                     local inside = true
                     for word in pairs(short_set) do

@@ -53,7 +53,7 @@ end
 
 function Build.book_waited(data, _, t, h)
     local book = data.book
-    local span = math.max(book.last_yday - book.first_yday, 1)
+    local span = math.max(book.finish_yday - book.first_yday, 1)
     return {
         kicker = t.waited_kicker,
         book_id = book.id,
@@ -63,20 +63,20 @@ function Build.book_waited(data, _, t, h)
         resume = (book.pause.to - book.first_yday) / span,
         start_label = h.month_of(book.first_yday),
         pause_label = t.waited_pause,
-        end_label = h.month_of(book.last_yday),
+        end_label = h.month_of(book.finish_yday),
         foot = t.waited_end,
     }
 end
 
 function Build.one_sitting(data, _, t, h)
     local book = data.book
-    local started, ended = os.date("*t", book.first_time), os.date("*t", book.last_time)
+    local started, ended = os.date("*t", book.first_time), os.date("*t", book.finish_time)
     return {
         dark = true,
         kicker = t.sitting_kicker,
         book_id = book.id,
         big = t.sitting_big,
-        label = t.sitting_label(book.total_pages, h.duration(book.seconds)),
+        label = t.sitting_label(book.total_pages, h.duration(book.finish_seconds)),
         foot = t.sitting_foot,
         start_hour = started.hour + started.min / 60,
         end_hour = ended.hour + ended.min / 60,
@@ -93,7 +93,7 @@ function Build.slow_burn(data, _, t, h)
         big = t.days_big(data.days),
         label = t.slow_label,
         title = book.title or t.untitled,
-        body = t.slow_body(h.date(book.first_yday), h.date(book.last_yday)),
+        body = t.slow_body(h.date(book.first_yday), h.date(book.finish_yday)),
     }
 end
 

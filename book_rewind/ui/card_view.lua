@@ -175,14 +175,20 @@ function Canvas:fit(x, y, text, name, sizes, width, color, anchor)
     elseif anchor == "l" or anchor == "r" then
         -- Text anchored to a side has no room to wrap around its x, so it stays on one line.
         local smallest = sizes[#sizes]
-        local limit = 0
+        local length = 0
         for _ in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-            limit = limit + 1
+            length = length + 1
         end
-        local short = text
-        while limit > 1 and self:measure(short, name, smallest) > width do
-            limit = limit - 1
-            short = clip(text, limit)
+        -- The longest clip that fits, found in a few measures instead of one per character.
+        local low, high, short = 1, length - 1, clip(text, 1)
+        while low <= high do
+            local middle = math.floor((low + high) / 2)
+            local candidate = clip(text, middle)
+            if self:measure(candidate, name, smallest) <= width then
+                low, short = middle + 1, candidate
+            else
+                high = middle - 1
+            end
         end
         self:text(x, y, short, name, smallest, color, anchor)
     else
@@ -752,6 +758,18 @@ end
 function CardView.close_rect(width, height)
     local c = new_canvas(nil, width, height)
     return { x = c:x(504), y = c:y(8), w = c:x(592) - c:x(504), h = c:y(56) - c:y(8) }
+end
+
+-- What stays on the screen when a card cannot be drawn: a short message, the way out and the position.
+function CardView.paint_error(bb, opts)
+    local c = new_canvas(bb, opts.width, opts.height)
+    bb:paintRect(0, 0, opts.width, opts.height, WHITE)
+    c:wrap(300, 360, opts.strings.card_failed, SERIF, 22, 480, BLACK, WHITE)
+    c:rect(504, 12, 590, 52, WHITE, BLACK, 2)
+    c:fit(547, 32, opts.strings.close, BOLD, { 15, 13, 11 }, 78, BLACK)
+    if opts.footer then
+        c:fit(300, 780, opts.footer, ITALIC, { 14, 12, 10 }, 560, BLACK)
+    end
 end
 
 function CardView.paint(bb, card, opts)

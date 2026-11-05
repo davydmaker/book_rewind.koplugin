@@ -37,6 +37,13 @@ local function number(value)
     return tonumber(value) or 0
 end
 
+local function numbers(column)
+    for i = 1, #column do
+        column[i] = number(column[i])
+    end
+    return column
+end
+
 local function single_value(conn, query)
     local result = conn:exec(query)
     return result and tonumber(result[1][1]) or nil
@@ -83,18 +90,23 @@ end
 function Store.load_year(path, year, now)
     return with_connection(path, function(conn)
         local first, after = year_bounds(year)
-        local rows = {}
+        -- The columns come back as they are, converted in place: a busy year has tens of thousands of rows.
+        local rows = { book = {}, start = {}, duration = {}, page = {}, total = {} }
         local result = conn:exec(string.format(
             "SELECT id_book, start_time, duration, page, total_pages FROM page_stat_data WHERE start_time >= %d AND start_time < %d ORDER BY start_time",
             first, after))
         if result then
-            for i = 1, #result[1] do
-                rows[i] = { number(result[1][i]), number(result[2][i]), number(result[3][i]), number(result[4][i]), number(result[5][i]) }
-            end
+            rows = {
+                book = numbers(result[1]), start = numbers(result[2]), duration = numbers(result[3]),
+                page = numbers(result[4]), total = numbers(result[5]),
+            }
         end
 
+        -- Only the books read in the year matter here.
+        local year_books = string.format("SELECT id_book FROM page_stat_data WHERE start_time >= %d AND start_time < %d", first, after)
+        local in_year = "id_book IN (" .. year_books .. ")"
         local books = {}
-        result = conn:exec("SELECT id, title, authors, pages, series, highlights, notes FROM book")
+        result = conn:exec("SELECT id, title, authors, pages, series, highlights, notes FROM book WHERE id IN (" .. year_books .. ")")
         if result then
             for i = 1, #result[1] do
                 books[number(result[1][i])] = {
@@ -106,20 +118,19 @@ function Store.load_year(path, year, now)
 
         local earlier_pages = {}
         result = conn:exec(string.format(
-            "SELECT DISTINCT id_book, page, total_pages FROM page_stat_data WHERE start_time < %d AND total_pages > 0 AND id_book IN (SELECT id_book FROM page_stat_data WHERE start_time >= %d AND start_time < %d)",
-            first, first, after))
+            "SELECT DISTINCT id_book, page, total_pages FROM page_stat_data WHERE start_time < %d AND total_pages > 0 AND %s",
+            first, in_year))
         if result then
             for i = 1, #result[1] do
                 earlier_pages[i] = { number(result[1][i]), number(result[2][i]), number(result[3][i]) }
             end
         end
 
-        local in_year = string.format("id_book IN (SELECT id_book FROM page_stat_data WHERE start_time >= %d AND start_time < %d)", first, after)
         local earlier_reads = {}
-        result = conn:exec(string.format("SELECT id_book, MIN(start_time), COUNT(*) FROM page_stat_data WHERE start_time < %d AND %s GROUP BY id_book", first, in_year))
+        result = conn:exec(string.format("SELECT id_book, MIN(start_time) FROM page_stat_data WHERE start_time < %d AND %s GROUP BY id_book", first, in_year))
         if result then
             for i = 1, #result[1] do
-                earlier_reads[number(result[1][i])] = { first = number(result[2][i]), rows = number(result[3][i]) }
+                earlier_reads[number(result[1][i])] = { first = number(result[2][i]) }
             end
         end
 
@@ -146,37 +157,135 @@ function Store.load_year(path, year, now)
     end)
 end
 
--- Covers live in the cache of the Cover browser plugin, found here by title and author.
-function Store.load_cover(path, title, authors)
+-- The pages of one book read before the year, in time order, to count how many times it was read to the end.
+function Store.book_history(path, book_id, year)
     return with_connection(path, function(conn)
-        local Blitbuffer = require("ffi/blitbuffer")
-        local zstd = require("ffi/zstd")
-        local query = "SELECT cover_w, cover_h, cover_bb_type, cover_bb_stride, cover_bb_data FROM bookinfo WHERE has_cover = 'Y' AND cover_bb_data IS NOT NULL AND title = ?"
-        local cover
-        local function read(statement)
-            local row = statement:step()
-            if row then
-                local w, h, kind, stride = tonumber(row[1]), tonumber(row[2]), tonumber(row[3]), tonumber(row[4])
-                local data, size = zstd.zstd_uncompress_ctx(row[5][1], row[5][2])
-                if size == stride * h then
-                    cover = Blitbuffer.new(w, h, kind, data, stride)
-                    cover:setAllocated(1)
-                else
-                    ffi.C.free(data)
+        local first = year_bounds(year)
+        local history = {}
+        local result = conn:exec(string.format(
+            "SELECT page, total_pages FROM page_stat_data WHERE id_book = %d AND start_time < %d AND total_pages > 0 ORDER BY start_time",
+            book_id, first))
+        if result then
+            for i = 1, #result[1] do
+                history[i] = { number(result[1][i]), number(result[2][i]) }
+            end
+        end
+        return history
+    end)
+end
+
+local MAX_COVER_SIDE = 10000
+
+-- A cover whose size does not match its pixels would make the screen read outside of it.
+local function plausible_cover(Blitbuffer, w, h, kind, stride)
+    if not (w and h and kind and stride) or w <= 0 or h <= 0 or w > MAX_COVER_SIDE or h > MAX_COVER_SIDE then
+        return false
+    end
+    local row_bytes = ({
+        [Blitbuffer.TYPE_BB4] = math.ceil(w / 2), [Blitbuffer.TYPE_BB8] = w, [Blitbuffer.TYPE_BB8A] = w * 2,
+        [Blitbuffer.TYPE_BBRGB16] = w * 2, [Blitbuffer.TYPE_BBRGB24] = w * 3, [Blitbuffer.TYPE_BBRGB32] = w * 4,
+    })[kind]
+    return row_bytes ~= nil and stride >= row_bytes
+end
+
+local Covers = {}
+Covers.__index = Covers
+
+-- Covers live in the cache of the Cover browser plugin, found there by title and author.
+-- The cache has no index on titles, so they are read once, and each cover is then read by its rowid.
+-- The connection stays open until close(), so a year with many covers opens the database once.
+function Store.open_covers(path)
+    local conn = open(path)
+    if not conn then
+        return nil
+    end
+    local ok, by_title = pcall(function()
+        local index = {}
+        local result = conn:exec("SELECT rowid, title, authors FROM bookinfo WHERE has_cover = 'Y' AND cover_bb_data IS NOT NULL")
+        if result then
+            for i = 1, #result[1] do
+                local title = result[2][i]
+                if type(title) == "string" then
+                    index[title] = index[title] or {}
+                    table.insert(index[title], { rowid = number(result[1][i]), authors = result[3][i] or "" })
                 end
             end
-            statement:clearbind():reset()
         end
-        local statement = conn:prepare(query .. " AND authors = ?")
-        read(statement:bind(title, authors or ""))
-        statement:close()
-        if not cover then
-            statement = conn:prepare(query)
-            read(statement:bind(title))
-            statement:close()
-        end
-        return cover
+        return index
     end)
+    if not ok then
+        logger.warn("Book Rewind: could not read", path, by_title)
+        conn:close()
+        return nil
+    end
+    return setmetatable({ conn = conn, by_title = by_title }, Covers)
+end
+
+-- The book with the same title and author. Without one, the title alone is enough only when a single
+-- book in the cache has it: generic titles such as "Poemas" would bring the cover of another book.
+function Covers:find(title, authors)
+    local list = type(title) == "string" and self.by_title[title]
+    if not list then
+        return nil
+    end
+    local wanted = type(authors) == "string" and authors or ""
+    for _, entry in ipairs(list) do
+        if entry.authors == wanted then
+            return entry.rowid
+        end
+    end
+    for i = 2, #list do
+        if list[i].authors ~= list[1].authors then
+            return nil
+        end
+    end
+    return list[1].rowid
+end
+
+local function read_cover(statement, rowid)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local zstd = require("ffi/zstd")
+    local row = statement:bind(rowid):step()
+    if not row then
+        return nil
+    end
+    local w, h, kind, stride, blob = tonumber(row[1]), tonumber(row[2]), tonumber(row[3]), tonumber(row[4]), row[5]
+    if type(blob) ~= "table" or not plausible_cover(Blitbuffer, w, h, kind, stride) then
+        return nil
+    end
+    local data, size = zstd.zstd_uncompress_ctx(blob[1], blob[2])
+    if size ~= stride * h then
+        ffi.C.free(data)
+        return nil
+    end
+    local cover = Blitbuffer.new(w, h, kind, data, stride)
+    cover:setAllocated(1)
+    return cover
+end
+
+-- Returns the cover as a new Blitbuffer, owned by the caller, or nil.
+function Covers:load(title, authors)
+    local rowid = self:find(title, authors)
+    if not rowid then
+        return nil
+    end
+    self.statement = self.statement or self.conn:prepare(
+        "SELECT cover_w, cover_h, cover_bb_type, cover_bb_stride, cover_bb_data FROM bookinfo WHERE rowid = ?")
+    local ok, cover = pcall(read_cover, self.statement, rowid)
+    pcall(function() self.statement:clearbind():reset() end)
+    if not ok then
+        logger.warn("Book Rewind: could not read a cover", cover)
+        return nil
+    end
+    return cover
+end
+
+function Covers:close()
+    if self.statement then
+        pcall(self.statement.close, self.statement)
+        self.statement = nil
+    end
+    pcall(self.conn.close, self.conn)
 end
 
 return Store

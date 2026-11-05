@@ -146,6 +146,30 @@ local exported = io.open(string.format("%s/exported/book_rewind_%d_01.png", out_
 if not exported then problem("exported image not found") else exported:close() end
 print("exported " .. saved .. " images")
 
+-- A new save removes the images of an older one that had more cards, and nothing else.
+do
+    local files = require("libs/libkoreader-lfs")
+    local folder = out_dir .. "/exported"
+    local function touch(name)
+        local file = io.open(folder .. "/" .. name, "wb")
+        file:write("x")
+        file:close()
+    end
+    local function exists(name)
+        return files.attributes(folder .. "/" .. name, "mode") == "file"
+    end
+    local stale = string.format("book_rewind_%d_%02d.png", year, #full.cards + 5)
+    local other_year = string.format("book_rewind_%d_01.png", year - 1)
+    local unrelated = string.format("book_rewind_%d_notes.png", year)
+    touch(stale); touch(other_year); touch(unrelated)
+    if full:export_images() ~= saved then problem("the second save did not write every image") end
+    if exists(stale) then problem("an image from an older save stayed") end
+    if not exists(other_year) or not exists(unrelated) then problem("a save removed a file that is not its own") end
+    if not exists(string.format("book_rewind_%d_01.png", year)) then problem("a save removed its own image") end
+    os.remove(folder .. "/" .. other_year)
+    os.remove(folder .. "/" .. unrelated)
+end
+
 for _, lang in ipairs({ "en", "es" }) do
     local translated = open_screen{ db_path = db, covers_db = no_covers, language = lang }
     for index, card in ipairs(translated.cards) do
@@ -402,6 +426,36 @@ local fallback = with_broken:load_cover(1, 100, 150)
 if not fallback then problem("a corrupted cover should become a generated cover") else fallback:free() end
 with_broken:onCloseWidget()
 
+-- A title shared by different books only brings a cover with the same author, and a cover whose
+-- size does not match its pixels is refused before being read.
+local shared_covers = DataStorage:getDataDir() .. "/shared_covers.sqlite3"
+os.remove(shared_covers)
+local shared = SQ3.open(shared_covers)
+shared:exec("CREATE TABLE bookinfo (title TEXT, authors TEXT, has_cover TEXT, cover_w INTEGER, cover_h INTEGER, cover_bb_type INTEGER, cover_bb_stride INTEGER, cover_bb_data BLOB)")
+shared:exec("INSERT INTO bookinfo VALUES ('Poemas', 'Ana Lima', 'Y', 10, 10, 1, 10, X'00')")
+shared:exec("INSERT INTO bookinfo VALUES ('Poemas', 'Bruno Dias', 'Y', 10, 10, 1, 10, X'00')")
+do
+    -- Fifty bytes of pixels, which match a stride of 5 for 10 rows but not a width of 10.
+    -- As in the Cover browser, SQLite takes over the compressed buffer.
+    local zstd, ffi = require("ffi/zstd"), require("ffi")
+    local pixels = ffi.new("uint8_t[50]")
+    local packed, size = zstd.zstd_compress(pixels, 50)
+    local insert = shared:prepare("INSERT INTO bookinfo VALUES ('Duna', 'Frank Herbert', 'Y', 10, 10, 1, 5, ?)")
+    insert:bind(SQ3.blob(packed, size)):step()
+    insert:close()
+end
+shared:close()
+local reader = require("book_rewind/store").open_covers(shared_covers)
+if not reader then
+    problem("the cover cache did not open")
+else
+    if reader:find("Poemas", "Bruno Dias") ~= 2 then problem("the same title and author should find the cover") end
+    if reader:find("Poemas", "Carla Souza") then problem("a shared title brought the cover of another book") end
+    if reader:find("Duna", "") ~= 3 then problem("a title found only once should find its cover") end
+    if reader:load("Duna", "Frank Herbert") then problem("a cover with rows shorter than its width was read") end
+    reader:close()
+end
+
 -- Covers are built once and survive repainting, and are released with the year.
 local cached = open_screen{ db_path = fake_db, covers_db = covers_path, language = "pt" }
 local builds = 0
@@ -522,6 +576,24 @@ if Screen:getWidth() > Screen:getHeight() then problem("did not return to portra
 rotated:onCloseWidget()
 if Screen:getRotationMode() ~= Screen.DEVICE_ROTATED_CLOCKWISE then problem("rotation was not restored") end
 Screen:setRotationMode(initial)
+
+-- A screen that fails to open puts the rotation back.
+Screen:setRotationMode(Screen.DEVICE_ROTATED_CLOCKWISE)
+if pcall(open_screen, { db_path = db, language = "xx" }) then problem("a screen without texts should not open") end
+if Screen:getRotationMode() ~= Screen.DEVICE_ROTATED_CLOCKWISE then problem("a failed opening did not restore the rotation") end
+Screen:setRotationMode(initial)
+
+-- A card that cannot be drawn shows a message, and the others are still reachable.
+local drawing = open_screen{ db_path = fake_db, covers_db = no_covers, language = "pt" }
+drawing:show_card(2)
+local real_id = drawing.cards[2].id
+drawing.cards[2].id = "no_such_card"
+if not pcall(drawing.paintTo, drawing, Screen.bb, 0, 0) then problem("a card that fails to draw broke the screen") end
+shot(drawing, "card_failed")
+drawing.cards[2].id = real_id
+tap(drawing, Screen:getWidth() - 10, Screen:getHeight() / 2)
+if drawing.index ~= 3 then problem("the navigation stopped after a card failed") end
+drawing:onCloseWidget()
 
 print("problems: " .. problems)
 os.exit(problems == 0 and 0 or 1)

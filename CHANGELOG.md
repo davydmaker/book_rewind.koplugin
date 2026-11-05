@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- A book opened again after it was finished keeps the day it reached the end. Before, looking something up months later moved it in the timeline, made the devoured book take longer, and could create a slow burn or a book that waited.
+- A book read in a single day and opened again later can now be the book read in one day.
+- The pages of your biggest day and the page where a book stopped follow the same rules as the rest of the cards, even after a change of font size.
+- The reread card counts readings to the end, so turning pages back and forth no longer adds readings.
+- Generated covers no longer print labels such as "Windows User" as the author, and a title shared by different books no longer brings the cover of another book.
+- If Book Rewind cannot open, a notice appears and the screen rotation is restored. A card that cannot be drawn shows a message, and the others stay available.
+- Saving images removes the images of that year left by an older save with more cards.
+- Covers load faster in large libraries, and opening a year uses less memory.
+
 ## [1.1.0]
 
 - 17 wildcard cards for what stands out in your year, with up to 3 per year: comebacks after a pause or after years, a book that waited for you, a book read in a single day, slow burns, rereads, series runs, books read at once, books you almost finished, your shortest and longest books, your most marked book, the first and last books of the year, your reading ritual, nights past midnight, a day to remember and each book's pace.

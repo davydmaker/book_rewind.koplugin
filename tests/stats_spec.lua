@@ -25,10 +25,15 @@ local BOOKS = {
     [3] = { title = "Sem Autor", authors = "N/A", pages = 50 },
     [4] = { title = "privesc_marker", authors = "N/A", pages = 1 },
 }
+-- The tests write rows as { book, start, duration, page, total_pages }, which is easier to read.
+local function run(opts)
+    opts.rows = Stats.columns(opts.rows)
+    return Stats.compute(opts)
+end
 local function compute(rows, extra)
     local opts = { year = 2026, books = BOOKS, rows = rows, now = at(12, 31, 12) }
     for k, v in pairs(extra or {}) do opts[k] = v end
-    return Stats.compute(opts)
+    return run(opts)
 end
 -- Rows for a run of pages of one book, one page per minute.
 local function pages_read(book, first, last, total, start)
@@ -389,7 +394,7 @@ local function sessions(list)
 end
 test("every profile is reachable with real reading", function()
     local function profile(list, books, now)
-        local m = Stats.compute{ year = 2026, books = books or BOOKS, rows = sessions(list), now = now or at(12, 31, 12) }
+        local m = run{ year = 2026, books = books or BOOKS, rows = sessions(list), now = now or at(12, 31, 12) }
         return Stats.archetype(m).id
     end
     local function ten_days(hour)
@@ -540,7 +545,7 @@ test("the devoured book is the fastest read from start to end in the year", func
     add(pages_read(2, 1, 60, 120, at(3, 1, 10))); add(pages_read(2, 61, 120, 120, at(3, 3, 10)))
     add(pages_read(4, 1, 10, 10, at(4, 1, 10)))
     add(pages_read(5, 1, 40, 200, at(5, 1, 10)))
-    local m = Stats.compute{ year = 2026, books = books, rows = rows, earlier_pages = earlier(3, 1, 10, 90), now = at(12, 31, 12) }
+    local m = run{ year = 2026, books = books, rows = rows, earlier_pages = earlier(3, 1, 10, 90), now = at(12, 31, 12) }
     eq(m.devoured.book.title, "Rápido")
     eq(m.devoured.days, 3)
     eq(m.devoured.pages_per_day, 40)
@@ -549,7 +554,7 @@ test("no eligible book means no devoured book", function()
     local m = compute({ { 1, at(1, 1, 10), 200, 1, 100 } })
     eq(m.devoured, nil)
 end)
-test("timeline groups finished books by the month of the last reading", function()
+test("timeline groups finished books by the month they reached the end", function()
     local rows = pages_read(1, 1, 50, 100, at(1, 5, 10))
     for _, row in ipairs(pages_read(1, 51, 100, 100, at(3, 2, 10))) do rows[#rows + 1] = row end
     for _, row in ipairs(pages_read(2, 1, 200, 200, at(3, 9, 10))) do rows[#rows + 1] = row end
@@ -958,6 +963,114 @@ end)
 test("a year with nothing remarkable has no wildcard", function()
     eq(#Wildcards.pick(compute({ { 1, at(3, 2, 10), 700, 1, 100 } })), 0)
     eq(#Wildcards.pick(compute({})), 0)
+end)
+
+-- A finished book opened again later, to look something up, keeps the day it reached the end.
+local function finished_then_reopened()
+    return joined(pages_read(1, 1, 100, 100, at(1, 10, 10)), pages_read(1, 50, 51, 100, at(6, 20, 10)),
+        pages_read(2, 1, 100, 200, at(3, 9, 10)), pages_read(2, 101, 200, 200, at(3, 12, 10)))
+end
+test("a book reopened after the end keeps the day it was finished", function()
+    local m = compute(finished_then_reopened())
+    local book = m.books[1].id == 1 and m.books[1] or m.books[2]
+    eq(book.finished, true)
+    eq(book.finish_yday, 10); eq(book.finish_seconds, 5000)
+    eq(book.last_yday, os.date("*t", at(6, 20, 10)).yday)
+    eq(m.devoured.book.id, 1); eq(m.devoured.days, 1)
+end)
+test("reopening a finished book makes no slow burn and no waiting", function()
+    local m = compute(finished_then_reopened())
+    eq(has(m, "slow_burn"), nil)
+    eq(has(m, "book_waited"), nil)
+    local sitting = has(m, "one_sitting")
+    eq(sitting ~= nil, true)
+    eq(card_of(m, "one_sitting").label, "100 páginas em 1 h 23 min")
+end)
+test("the timeline puts a reopened book in the month it was finished", function()
+    local m = compute(finished_then_reopened())
+    local timeline
+    for _, card in ipairs(Cards.build(m, { books = BOOKS, strings = I18n.pt })) do
+        if card.id == "timeline" then timeline = card end
+    end
+    eq(#timeline.months_books[1], 1)
+    eq(#timeline.months_books[3], 1)
+    eq(#timeline.months_books[6], 0)
+    eq(timeline.months_books[1][1].title, "Livro A")
+end)
+test("a pause before the end still counts, and a pause after it does not", function()
+    local rows = joined(pages_read(1, 1, 40, 100, at(2, 1, 10)), pages_read(1, 41, 100, 100, at(6, 1, 10)), pages_read(1, 1, 2, 100, at(12, 1, 10)))
+    local m = compute(rows)
+    local waited = has(m, "book_waited")
+    eq(waited.data.book.pause.days, os.date("*t", at(6, 1)).yday - os.date("*t", at(2, 1)).yday - 1)
+    eq(card_of(m, "book_waited").end_label, "junho")
+    eq(has(m, "slow_burn").data.days, os.date("*t", at(6, 1)).yday - os.date("*t", at(2, 1)).yday + 1)
+end)
+test("a reread finishes when the whole book is read again, not when it is reopened", function()
+    local rows = joined(pages_read(1, 1, 100, 100, at(3, 1, 10)), pages_read(1, 10, 12, 100, at(8, 1, 10)))
+    local m = compute(rows, { earlier_pages = earlier(1, 1, 100, 100) })
+    eq(m.books[1].reread, true)
+    eq(m.books[1].finish_yday, os.date("*t", at(3, 1)).yday)
+end)
+test("the pages of the biggest day follow the rule of the year", function()
+    local books = { { title = "X", authors = "Ana Lima", pages = 100 } }
+    -- The same first half, read at two font sizes on the same day.
+    local rows = joined(pages_read(1, 1, 50, 100, at(3, 1, 8)), pages_read(1, 1, 100, 200, at(3, 1, 14)))
+    local m = compute(rows, { books = books })
+    eq(m.total_pages, 50)
+    eq(m.best_day.pages, 50)
+end)
+test("the biggest day of a book with no page count uses the pages of its rows", function()
+    local books = { { title = "X", authors = "Ana Lima", pages = 0 } }
+    local m = compute(pages_read(1, 1, 30, 120, at(3, 1, 8)), { books = books })
+    eq(m.best_day.pages, 30)
+end)
+test("the page where a book stopped is in the book's own pagination", function()
+    local books = { { title = "X", authors = "Ana Lima", pages = 100 } }
+    -- Pages 1 to 80 of 200 at a small font are the first 40% of the book.
+    local rows = joined(pages_read(1, 1, 80, 200, at(2, 1, 10)), pages_read(1, 81, 200, 200, at(6, 1, 10)))
+    eq(has(compute(rows, { books = books }), "book_waited").data.book.pause.page, 40)
+end)
+test("passes count each reading to the end, at any font size", function()
+    local function history(first, last, total)
+        local list = {}
+        for page = first, last do list[#list + 1] = { page, total } end
+        return list
+    end
+    local whole = history(1, 100, 100)
+    for _, row in ipairs(history(1, 30, 100)) do whole[#whole + 1] = row end
+    for _, row in ipairs(history(1, 200, 200)) do whole[#whole + 1] = row end
+    eq(Stats.count_passes(whole), 2)
+    eq(Stats.count_passes(history(1, 50, 100)), 0)
+    eq(Stats.count_passes({}), 0)
+end)
+test("wildcard: reread counts every earlier pass", function()
+    local passes = {}
+    for _ = 1, 2 do
+        for page = 1, 100 do passes[#passes + 1] = { page, 100 } end
+    end
+    local m = compute(pages_read(1, 1, 100, 100, at(5, 2, 10)), {
+        earlier_pages = earlier(1, 1, 100, 100),
+        earlier_reads = { [1] = { first = os.time{ year = 2022, month = 4, day = 1, hour = 12 } } },
+        earlier_history = function(id) eq(id, 1); return passes end,
+    })
+    eq(has(m, "reread").data.book.read_count, 3)
+    eq(card_of(m, "reread", "en").big, "For the 3rd time")
+    -- Pages turned back and forth do not add readings.
+    local m2 = compute(pages_read(1, 1, 100, 100, at(5, 2, 10)), {
+        earlier_pages = earlier(1, 1, 100, 100),
+        earlier_history = function()
+            local list = {}
+            for page = 1, 100 do list[#list + 1] = { page, 100 } end
+            for page = 1, 60 do list[#list + 1] = { page, 100 } end
+            return list
+        end,
+    })
+    eq(has(m2, "reread").data.book.read_count, 2)
+end)
+test("rows in columns give the same result as rows in a list", function()
+    local rows = finished_then_reopened()
+    local columns = Stats.columns(rows)
+    eq(#columns.start, #rows); eq(columns.book[1], rows[1][1]); eq(columns.total[#rows], rows[#rows][5])
 end)
 
 print(string.format("%d passed, %d failed", passed, failed))
