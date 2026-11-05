@@ -27,18 +27,7 @@ local function upper(text)
     return (text:upper():gsub("[\194-\244][\128-\191]*", function(char) return UPPER[char] or char end))
 end
 
--- Long titles would push everything else off the card. Counts characters, not bytes.
-local function clip(text, limit)
-    local out, count = {}, 0
-    for char in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        count = count + 1
-        if count > limit then
-            return table.concat(out):gsub("%s+$", "") .. "…"
-        end
-        out[count] = char
-    end
-    return text
-end
+local clip = Cards.clip
 
 local CardView = {}
 
@@ -183,6 +172,19 @@ function Canvas:fit(x, y, text, name, sizes, width, color, anchor)
     local size = self:fit_size(text, name, sizes, width)
     if size then
         self:text(x, y, text, name, size, color, anchor)
+    elseif anchor == "l" or anchor == "r" then
+        -- Text anchored to a side has no room to wrap around its x, so it stays on one line.
+        local smallest = sizes[#sizes]
+        local limit = 0
+        for _ in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+            limit = limit + 1
+        end
+        local short = text
+        while limit > 1 and self:measure(short, name, smallest) > width do
+            limit = limit - 1
+            short = clip(text, limit)
+        end
+        self:text(x, y, short, name, smallest, color, anchor)
     else
         self:wrap(x, y - sizes[#sizes] * 0.7, text, name, sizes[#sizes], width, color, nil, sizes[#sizes] * 3)
     end
@@ -222,7 +224,7 @@ function Canvas:art(plugin_dir, name, dark)
 end
 
 -- Draws a book cover fitted inside the box. Returns false when the book has no cover. The provider owns the cover.
-function Canvas:cover(provider, book_id, x, y, w, h, frame)
+function Canvas:cover(provider, book_id, x, y, w, h, frame, frame_color)
     if not provider then
         return false
     end
@@ -235,7 +237,7 @@ function Canvas:cover(provider, book_id, x, y, w, h, frame)
     local py = self:y(y) + math.floor((box_h - cover_h) / 2)
     self.bb:blitFrom(cover, px, py, 0, 0, cover_w, cover_h)
     if frame then
-        self.bb:paintBorder(px, py, cover_w, cover_h, self:len(frame), BLACK)
+        self.bb:paintBorder(px, py, cover_w, cover_h, self:len(frame), frame_color or BLACK)
     end
     return true
 end
@@ -615,8 +617,8 @@ function Paint.speed(c, card)
 end
 
 -- A small fixed sequence, so the piles look the same every time the card opens.
-local function pile(c, cx, count, base)
-    local tones = { "black", "white", "dots", "black", "hatch", "white" }
+local function pile(c, cx, count, base, palette)
+    local tones = palette or { "black", "white", "dots", "black", "hatch", "white" }
     local seed = 12
     local function next_value(low, high)
         seed = (seed * 1103515245 + 12345) % 2147483648
@@ -660,7 +662,10 @@ end
 function Paint.archetype(c, card)
     c:text(300, 60, card.kicker, ITALIC, 24)
     c:fit(300, 531, upper(card.big_text), BOLD, { 42, 34, 28, 22 }, 330)
-    c:wrap(300, 605, card.body, SERIF, 20, 510, BLACK, WHITE, 145)
+    if card.secondary then
+        c:fit(300, 603, card.secondary, ITALIC, { 16, 14, 12 }, 510)
+    end
+    c:wrap(300, 622, card.body, SERIF, 20, 510, BLACK, WHITE, 130)
 end
 
 function Paint.summary(c, card, t)
@@ -698,6 +703,12 @@ function Paint.about(c, card, t)
     c:wrap(300, 518, t.about_license, SERIF, 16, 500, BLACK, WHITE, 120)
     c:text(300, 680, t.about_warranty, ITALIC, 16)
 end
+
+require("book_rewind/ui/wildcard_paint")(Paint, {
+    BLACK = BLACK, WHITE = WHITE, GRAY = GRAY, LIGHT = LIGHT,
+    SERIF = SERIF, BOLD = BOLD, ITALIC = ITALIC, SANS = SANS,
+    spine = spine, pile = pile, clip = clip, upper = upper,
+})
 
 local function button_box(c, rect, label)
     c:rect(rect.dx0, rect.dy0, rect.dx1, rect.dy1, WHITE, BLACK, 2)

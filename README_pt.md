@@ -28,7 +28,7 @@
 
 ## Os cartões
 
-Até 18 cartões contam a história do seu ano. Cada um só aparece quando há dados para ele, então mesmo um histórico curto forma uma sequência coerente.
+Até 21 cartões contam a história do seu ano. Cada um só aparece quando há dados para ele, então mesmo um histórico curto forma uma sequência coerente.
 
 <table>
   <tr>
@@ -47,11 +47,24 @@ Até 18 cartões contam a história do seu ano. Cada um só aparece quando há d
 
 Também aparecem o tempo e as páginas do ano, o autor mais lido, o livro devorado, o maior dia, a maior sessão, o dia da semana favorito e o seu ritmo.
 
+### Coringas
+
+Até 3 cartões raros por ano, para o que realmente se destacou: a volta depois de uma longa pausa, um livro lido em um dia, uma série inteira, uma releitura, noites depois da meia-noite e mais, entre 17. Um ano sem nada marcante não mostra nenhum.
+
+<table>
+  <tr>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/wildcards/comeback.png" alt="Cartão sobre uma longa pausa e a volta"><br><sub><b>A volta</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/wildcards/series_run.png" alt="Cartão sobre uma série, com livros numerados"><br><sub><b>Maratona de série</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/wildcards/past_midnight.png" alt="Cartão sobre ler depois da meia-noite"><br><sub><b>Virando a noite</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/wildcards/slow_burn.png" alt="Cartão sobre um livro que levou meses, com uma vela"><br><sub><b>Fogo lento</b></sub></td>
+  </tr>
+</table>
+
 **Salvar Imagens** grava os cartões como PNG na pasta de capturas do KOReader, prontos para compartilhar.
 
 ## Perfis de leitura
 
-Cada ano termina com um cartão que descreve como você lê. Vence o seu traço mais forte, e o seguinte aparece como toque secundário.
+Cada ano termina com um cartão que descreve como você lê. Vence o seu traço mais forte, e o seguinte aparece como traço secundário.
 
 <table>
   <tr>

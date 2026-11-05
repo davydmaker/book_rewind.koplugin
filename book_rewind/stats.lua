@@ -9,6 +9,7 @@ local COVERAGE_STEPS = 1000
 local TOP_SESSIONS = 5
 local MIN_PATTERN_DAYS = 7
 local MIN_STEADY_DAYS = 14
+local SEGMENT_GAP_DAYS = 14
 local NIGHT_HOURS = { [22] = true, [23] = true, [0] = true, [1] = true, [2] = true, [3] = true, [4] = true }
 local MORNING_HOURS = { [5] = true, [6] = true, [7] = true, [8] = true }
 local NIGHT_CHANCE, MORNING_CHANCE, WEEKEND_CHANCE = 7 / 24, 4 / 24, 2 / 7
@@ -22,16 +23,84 @@ for plain, chars in pairs({
     end
 end
 
-local function known(value)
-    return type(value) == "string" and value ~= "" and value ~= "N/A"
+local TITLE_PLACEHOLDERS = { ["n/a"] = true, ["unknown"] = true, ["desconhecido"] = true, ["desconocido"] = true }
+-- What documents carry when nobody filled in the author: the account that made the file, or a generic label.
+local AUTHOR_PLACEHOLDERS = {
+    ["n/a"] = true, ["unknown"] = true, ["unknown author"] = true, ["author"] = true, ["autor"] = true,
+    ["desconhecido"] = true, ["autor desconhecido"] = true, ["desconocido"] = true, ["autor desconocido"] = true,
+    ["sem autor"] = true, ["user"] = true, ["usuario"] = true, ["windows user"] = true, ["microsoft office user"] = true,
+    ["administrador"] = true, ["administrator"] = true, ["admin"] = true,
+    ["varios"] = true, ["varios autores"] = true, ["various"] = true, ["various authors"] = true,
+    ["anonymous"] = true, ["personal"] = true, ["digital source"] = true, ["pdfcreator"] = true,
+    ["adolix split & merge pdf"] = true,
+}
+local TITLE_TAGS = {
+    ["portuguese edition"] = true, ["brazilian portuguese edition"] = true, ["english edition"] = true, ["spanish edition"] = true,
+    ["edicao em portugues"] = true, ["edicao portuguesa"] = true, ["edicion en espanol"] = true, ["edicion espanola"] = true,
+    ["em portugues do brasil"] = true, ["em portuguese do brasil"] = true, ["oficial"] = true,
+}
+local DOMAIN_ENDINGS = { com = true, net = true, org = true, br = true, xyz = true, website = true, site = true, club = true, info = true, love = true, me = true, biz = true }
+local SITE_MARKS = { "livros", "ebook", "e%-book", "epub", "%.com", "%.net", "%.org", "%.xyz", "%.website", "%.site" }
+local FILE_EXTENSIONS = { pdf = true, doc = true, docx = true, indd = true, qxd = true, qxp = true, pmd = true, rtf = true, txt = true, epub = true, mobi = true, p65 = true, cdr = true }
+
+function Stats.fold(text)
+    return (text:gsub("\195[\128-\191]", ACCENTS):lower())
+end
+local fold = Stats.fold
+
+local function trim(text)
+    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local function known_title(value)
+    return type(value) == "string" and trim(value) ~= "" and not TITLE_PLACEHOLDERS[fold(trim(value))]
+end
+
+local function known_author(value)
+    if type(value) ~= "string" then
+        return false
+    end
+    local name = fold(trim(value))
+    if AUTHOR_PLACEHOLDERS[name] or name:find("https?:") or name:find("www%.") or name:find("%.com") or name:find("%.net") then
+        return false
+    end
+    return select(2, name:gsub("[%a\194-\244]", "")) > 2
+end
+
+local function word_count(text)
+    return select(2, text:gsub("%S+", ""))
+end
+
+-- A comma usually means "Last, First", so it only separates people when every part is a full name.
+local function split_person_list(text)
+    local parts = {}
+    for part in text:gmatch("[^,]+") do
+        parts[#parts + 1] = trim(part)
+        if word_count(part) < 2 then
+            return { text }
+        end
+    end
+    return parts
+end
+
+-- Each line is a credited author, and files also pack several people into one line.
+-- " e " stays together, because it is part of names like "Cruz e Sousa". "and" and "with" do not have that problem.
 function Stats.split_authors(authors)
     local out = {}
-    if known(authors) then
-        for name in authors:gmatch("[^\n]+") do
-            if known(name) then
-                out[#out + 1] = name
+    if type(authors) == "string" then
+        for line in authors:gmatch("[^\n]+") do
+            -- Program names can contain the separators, so the whole line is checked first.
+            if not AUTHOR_PLACEHOLDERS[fold(trim(line))] then
+                local separated = line:gsub(",?%s+[Aa][Nn][Dd]%s+", ";"):gsub(",?%s+[Ww][Ii][Tt][Hh]%s+", ";")
+                for group in separated:gmatch("[^;&]+") do
+                    -- Catalogs add the year to the name: "Albert Camus, 1958." or "Croce, Benedetto, 1866-1952".
+                    local without_date = trim(group):gsub(",%s*%d%d%d%d%-?%d*%.?$", "")
+                    for _, name in ipairs(split_person_list(trim(without_date))) do
+                        if known_author(name) then
+                            out[#out + 1] = name
+                        end
+                    end
+                end
             end
         end
     end
@@ -40,13 +109,106 @@ end
 
 -- The same person under different spellings: "J.R.R. Tolkien", "Tolkien, J. R. R.", "José"/"Jose".
 function Stats.author_key(name)
-    local folded = name:gsub("\195[\128-\191]", ACCENTS):lower()
     local words = {}
-    for word in folded:gmatch("[%w\128-\255]+") do
+    for word in fold(name):gmatch("[%w\128-\255]+") do
         words[#words + 1] = word
     end
     table.sort(words)
     return #words > 0 and table.concat(words, " ") or name
+end
+
+local function is_domain(word)
+    local lowered = word:lower()
+    if lowered:find("^https?://") or lowered:find("^www%.") then
+        return true
+    end
+    local ending = lowered:match("%.(%a+)/?$")
+    return ending ~= nil and DOMAIN_ENDINGS[ending] == true and lowered:find("^[%w%.%-]+%.%a+/?$") ~= nil
+end
+
+-- A site named at the edges of the title. Only an address or a clear separator counts,
+-- because a title can be about a site, like "Como vender na Amazon.com".
+local function strip_site_edges(title)
+    local cleaned = title
+    local first, rest = cleaned:match("^(%S+)%s*[%-|_:]+%s*(.+)$")
+    if first and is_domain(first) then
+        cleaned = rest
+    end
+    local head, last = cleaned:match("^(.-)%s*[%-|_]+%s*(%S+)$")
+    if head and head ~= "" and is_domain(last) then
+        cleaned = head
+    end
+    local address_head, address = cleaned:match("^(.-)%s+(%S+)$")
+    if address_head and address_head ~= "" and (address:lower():find("^https?://") or address:lower():find("^www%.")) then
+        cleaned = address_head
+    end
+    return cleaned
+end
+
+local function is_site_mark(text)
+    local lowered = text:lower()
+    for _, mark in ipairs(SITE_MARKS) do
+        if lowered:find(mark) then
+            return true
+        end
+    end
+    return false
+end
+
+-- "Eric Hobsbawm - A Era das Revoluções" is how a file is named, not the title of the book.
+local function strip_author_prefix(title, authors)
+    local head, rest = title:match("^(.-)%s+%-%s+(.+)$")
+    if not head or not authors then
+        return title
+    end
+    local head_key = Stats.author_key(head)
+    for _, name in ipairs(Stats.split_authors(authors)) do
+        if Stats.author_key(name) == head_key then
+            return rest
+        end
+    end
+    return title
+end
+
+-- What the file carries besides the title: the program that made it, its own file name,
+-- the mark of the site it came from, a tag about the edition, or the author again.
+function Stats.clean_title(title, authors)
+    if not known_title(title) then
+        return nil
+    end
+    local cleaned = trim(title)
+    local from_file = false
+    local wrapped = cleaned:match("^%((.*)%)$")
+    if wrapped and wrapped:lower():find("^microsoft %a+ %- ") then
+        cleaned = trim(wrapped)
+    end
+    local lowered = cleaned:lower()
+    for _, prefix in ipairs({ "microsoft word %- ", "microsoft powerpoint %- " }) do
+        local _, ends = lowered:find("^" .. prefix)
+        if ends then
+            cleaned = cleaned:sub(ends + 1)
+            from_file = true
+        end
+    end
+    local stem, extension = cleaned:match("^(.+)%.(%w+)$")
+    if stem and FILE_EXTENSIONS[extension:lower()] then
+        cleaned = stem:gsub("[_%-]cs%d+$", "")
+        from_file = true
+    end
+    if cleaned:find("_") and (from_file or not cleaned:find("%s")) then
+        cleaned = trim((cleaned:gsub("_+", " ")))
+    end
+    cleaned = cleaned:gsub("%s*%[([^%]]*)%]", function(inner)
+        return is_site_mark(inner) and "" or nil
+    end)
+    cleaned = cleaned:gsub("%s*%(([^%)]*)%)", function(inner)
+        local tag = trim(inner)
+        return (TITLE_TAGS[fold(tag)] or is_domain(tag)) and "" or nil
+    end)
+    cleaned = strip_site_edges(trim(cleaned))
+    cleaned = strip_author_prefix(trim(cleaned), authors)
+    cleaned = trim(cleaned)
+    return cleaned ~= "" and cleaned or trim(title)
 end
 
 -- Time zones change on multiples of 15 minutes, so a bucket never crosses a local hour or day.
@@ -135,6 +297,8 @@ function Stats.compute(opts)
         previous_seconds = opts.previous_seconds or 0,
     }
     local cache, days, book_seconds, year_marks = {}, {}, {}, {}
+    local tracks, first_book_by_day, session_hours = {}, {}, {}
+    local midnight = { count = 0 }
     local book_first, book_last = {}, {}
     local last_end, session_seconds, session_start, session_book_seconds
     local longest = { seconds = 0 }
@@ -145,6 +309,14 @@ function Stats.compute(opts)
             return
         end
         session_lengths[#session_lengths + 1] = session_seconds
+        local ended = os.date("*t", last_end)
+        if ended.yday ~= date_parts(cache, session_start).yday then
+            midnight.count = midnight.count + 1
+            local minutes = ended.hour * 60 + ended.min
+            if ended.hour < 6 and (not midnight.latest or minutes > midnight.latest) then
+                midnight.latest = minutes
+            end
+        end
         if session_seconds > longest.seconds then
             local book, most = nil, -1
             for id, seconds in pairs(session_book_seconds) do
@@ -172,10 +344,31 @@ function Stats.compute(opts)
             end
             book_last[book] = start
             mark_page(year_marks[book], row[4], row[5])
+            first_book_by_day[parts.yday] = first_book_by_day[parts.yday] or book
+
+            local track = tracks[book]
+            if not track then
+                track = { rows = 0, segments = { { from = parts.yday, to = parts.yday } } }
+                tracks[book] = track
+            elseif parts.yday ~= track.last_yday then
+                local gap = parts.yday - track.last_yday - 1
+                if gap > 0 and (not track.pause or gap > track.pause.days) then
+                    track.pause = { days = gap, page = track.last_page, from = track.last_yday, to = parts.yday }
+                end
+                if gap > SEGMENT_GAP_DAYS then
+                    track.segments[#track.segments + 1] = { from = parts.yday, to = parts.yday }
+                else
+                    track.segments[#track.segments].to = parts.yday
+                end
+            end
+            track.rows = track.rows + 1
+            track.last_yday, track.last_page = parts.yday, row[4]
 
             if not last_end or start - last_end > SESSION_GAP then
                 close_session()
                 session_seconds, session_start, session_book_seconds = 0, start, {}
+                session_hours[parts.yday] = session_hours[parts.yday] or {}
+                session_hours[parts.yday][parts.hour] = true
             end
             session_seconds = session_seconds + duration
             session_book_seconds[book] = (session_book_seconds[book] or 0) + duration
@@ -218,7 +411,32 @@ function Stats.compute(opts)
             best_streak, best_streak_end = streak, yday
         end
     end
+    if best_day.yday then
+        local day_seconds, day_pages = {}, {}
+        for _, row in ipairs(opts.rows) do
+            local parts = date_parts(cache, row[2])
+            if parts.year == year and parts.yday == best_day.yday then
+                day_seconds[row[1]] = (day_seconds[row[1]] or 0) + row[3]
+                day_pages[row[1]] = day_pages[row[1]] or {}
+                day_pages[row[1]][row[4]] = true
+            end
+        end
+        local most = ranked(day_seconds)[1]
+        best_day.book_id = most.key
+        best_day.pages = 0
+        for _ in pairs(day_pages[most.key]) do
+            best_day.pages = best_day.pages + 1
+        end
+    end
     result.days = days
+    result.day_list = yday_list
+    result.first_book_by_day = first_book_by_day
+    result.session_hours = session_hours
+    result.past_midnight = midnight
+    result.year_closed = os.date("*t", opts.now or os.time()).year > year
+    result.first_read = opts.rows[1] and opts.rows[1][2] or nil
+    result.last_read_before = opts.last_read_before
+    result.last_year_seconds = opts.last_year_seconds
     result.longest_streak_end = best_streak_end
     result.days_read = #yday_list
     result.longest_streak = best_streak
@@ -248,7 +466,9 @@ function Stats.compute(opts)
     result.weekend_share = total > 0 and (result.weekdays[1] + result.weekdays[7]) / total or 0
 
     result.books, result.finished_books = {}, {}
+    local by_id = {}
     local author_names, author_seconds, author_books, author_long_books = {}, {}, {}, {}
+    local merged_into = {}
     local total_pages = 0
     for _, entry in ipairs(ranked(book_seconds)) do
         local id, seconds = entry.key, entry.seconds
@@ -268,19 +488,35 @@ function Stats.compute(opts)
             local first_date, last_date = date_parts(cache, book_first[id]), date_parts(cache, book_last[id])
             local info = {
                 id = id,
-                title = known(book.title) and book.title or nil,
+                title = Stats.clean_title(book.title, book.authors),
                 seconds = seconds,
                 pages = read,
                 total_pages = page_count,
                 finished = finished,
                 finished_earlier = not finished and before >= FINISHED_FRACTION,
+                reread = finished and before >= FINISHED_FRACTION,
+                overall = covered_share(year_marks[id], earlier),
+                read_later = opts.read_later and opts.read_later[id] or false,
+                series = known_title(book.series) and (book.series:gsub("%s*#[%d%.]+%s*$", "")) or nil,
+                highlights = book.highlights or 0,
+                notes = book.notes or 0,
+                pause = tracks[id].pause,
+                segments = tracks[id].segments,
+                first_time = book_first[id],
+                authors = book.authors,
                 first_yday = first_date.yday,
                 last_yday = last_date.yday,
                 last_month = last_date.month,
                 last_time = book_last[id],
                 started_before_year = earlier ~= nil,
             }
+            if info.reread and opts.earlier_reads and opts.earlier_reads[id] then
+                local reads = opts.earlier_reads[id]
+                info.first_read_year = os.date("*t", reads.first).year
+                info.read_count = math.max(2, math.floor((reads.rows + tracks[id].rows) / math.max(page_count, 1) + 0.5))
+            end
             result.books[#result.books + 1] = info
+            by_id[id] = info
             if finished then
                 result.finished_books[#result.finished_books + 1] = info
             end
@@ -307,6 +543,47 @@ function Stats.compute(opts)
         end
     end
     result.pages_per_hour = total > 0 and total_pages * 3600 / total or 0
+    result.best_day.book = result.best_day.book_id and by_id[result.best_day.book_id] or nil
+
+    -- "Friedrich Nietzsche" inside "Friedrich Wilhelm Nietzsche" is the same person, when only one longer name fits.
+    local function word_set(key)
+        local set, count = {}, 0
+        for word in key:gmatch("%S+") do
+            set[word] = true
+            count = count + 1
+        end
+        return set, count
+    end
+    for short in pairs(author_seconds) do
+        local short_set, short_count = word_set(short)
+        local target, matches = nil, 0
+        if short_count >= 2 then
+            for long in pairs(author_seconds) do
+                local long_set, long_count = word_set(long)
+                if long_count > short_count then
+                    local inside = true
+                    for word in pairs(short_set) do
+                        inside = inside and long_set[word] == true
+                    end
+                    if inside then
+                        target, matches = long, matches + 1
+                    end
+                end
+            end
+        end
+        if matches == 1 then
+            merged_into[short] = target
+        end
+    end
+    for short, long in pairs(merged_into) do
+        if author_seconds[short] > author_seconds[long] then
+            author_names[long] = author_names[short]
+        end
+        author_seconds[long] = author_seconds[long] + author_seconds[short]
+        author_books[long] = author_books[long] + author_books[short]
+        author_long_books[long] = (author_long_books[long] or 0) + (author_long_books[short] or 0)
+        author_seconds[short] = nil
+    end
 
     result.authors = {}
     local authors_read, read_seconds, squared = 0, 0, 0
@@ -333,12 +610,13 @@ end
 
 -- A trait counts once it reaches its threshold. The score goes from 1 at the threshold to 2 at
 -- what is exceptional for it, and stops there, so one huge number cannot outweigh a whole year.
-local function strength(value, threshold, exceptional)
+function Stats.strength(value, threshold, exceptional)
     if value < threshold then
         return 0
     end
     return math.min(2, 1 + (value - threshold) / (exceptional - threshold))
 end
+local strength = Stats.strength
 
 -- How far a share goes beyond chance, from 0 to 1, because time windows have different sizes.
 -- A few days of reading say nothing about a habit.

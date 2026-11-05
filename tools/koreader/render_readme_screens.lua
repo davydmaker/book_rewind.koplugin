@@ -22,6 +22,7 @@ local db = DataStorage:getDataDir() .. "/readme_stats.sqlite3"
 FakeHistory.write(db, os.time{ year = year, month = 11, day = 15, hour = 12 })
 
 local WANTED = { "cover", "books", "timeline", "streak", "hours", "months", "previous", "summary" }
+local WILDCARDS = { comeback = true, series_run = true, past_midnight = true, slow_burn = true }
 local bb = Blitbuffer.new(Device.screen:getWidth(), Device.screen:getHeight(), Blitbuffer.TYPE_BB8)
 
 local function save(screen, card, path)
@@ -37,6 +38,7 @@ local after_the_year = os.time{ year = year + 1, month = 2, day = 15, hour = 12 
 for _, language in ipairs({ "en", "pt" }) do
     local folder = language == "en" and out_dir or (out_dir .. "/" .. language)
     util.makePath(folder .. "/profiles")
+    util.makePath(folder .. "/wildcards")
     local screen = Screen:new{ db_path = db, covers_db = DataStorage:getDataDir() .. "/none.sqlite3", language = language, now = after_the_year }
     for _, id in ipairs(WANTED) do
         for _, card in ipairs(screen.cards) do
@@ -50,6 +52,8 @@ for _, language in ipairs({ "en", "pt" }) do
         for _, card in ipairs(screen.cards) do
             if card.id == "archetype" then
                 save(screen, card, folder .. "/profiles/" .. Stats.archetype(screen.metrics).id .. ".png")
+            elseif WILDCARDS[card.id] then
+                save(screen, card, folder .. "/wildcards/" .. card.id .. ".png")
             end
         end
     end

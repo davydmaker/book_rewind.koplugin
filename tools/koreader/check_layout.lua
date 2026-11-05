@@ -430,9 +430,61 @@ if keys.index ~= 1 then problem("the previous key did not work") end
 if Device:hasKeys() and not (keys.key_events and keys.key_events.Close) then problem("the close key is missing") end
 keys:onCloseWidget()
 
+-- Real files carry very long titles and authors, and every card and cover has to hold them.
+local LONG_TITLE = "Um Título Muito Longo: uma Ferramenta Comprovada que Gera Resultados Extraordinários em Muito Pouco Tempo [e-Livros]"
+local LONG_NO_COLON = "Um Título Muito Longo e sem Dois Pontos que Segue Falando por Muito Tempo - Uma Coleção Comprida de Leitores - Vol 12"
+local long_db = DataStorage:getDataDir() .. "/long_titles.sqlite3"
+FakeHistory.write(long_db, REFERENCE)
+do
+    local long_conn = SQ3.open(long_db)
+    long_conn:exec(string.format("UPDATE book SET title = CASE WHEN id %% 2 = 0 THEN '%s' ELSE '%s' END, authors = 'Maria Aparecida de Albuquerque Vasconcelos Figueiredo' WHERE title <> 'privesc_marker'", LONG_TITLE, LONG_NO_COLON))
+    long_conn:close()
+end
+local long_screen = open_screen{ db_path = long_db, covers_db = no_covers, language = "pt" }
+for _, long_year in ipairs(long_screen.years) do
+    long_screen:open_year(long_year)
+    for index, card in ipairs(long_screen.cards) do
+        long_screen:show_card(index)
+        long_screen:paintTo(Screen.bb, 0, 0)
+        if long_screen.overflow then problem(string.format("card %s of %d overflows with a long title", card.id, long_year)) end
+        if card.id == "juggler" or card.id == "pace_change" or card.id == "memorable_day" or card.id == "comeback" then
+            shot(long_screen, "long_title_" .. card.id)
+        end
+    end
+end
+-- The rows of the juggler card sit on the left of a chart, with no room for a second line.
+do
+    local long_rows = {}
+    for i = 1, 5 do
+        long_rows[i] = { title = LONG_NO_COLON, from = 60 + i, to = 90 + i * 2 }
+    end
+    local long_bb = require("ffi/blitbuffer").new(Screen:getWidth(), Screen:getHeight(), require("ffi/blitbuffer").TYPE_BB8)
+    local overflowed = require("book_rewind/ui/card_view").paint(long_bb, {
+        id = "juggler", kicker = "Você é malabarista", big = "5 livros", label = "abertos ao mesmo tempo, em março",
+        rows = long_rows, peak = 75, peak_label = "março", foot = "E você terminou 3 deles.",
+    }, { width = long_bb:getWidth(), height = long_bb:getHeight(), strings = I18n.pt, plugin_dir = plugin_dir, export = true })
+    if overflowed then problem("juggler overflows with long titles") end
+    long_bb:writePNG(out_dir .. "/long_title_juggler.png")
+    long_bb:free()
+end
+for book_id = 2, 3 do
+    local long_cover = long_screen:load_cover(book_id, 204, 300)
+    if not long_cover then
+        problem("a long title should still get a generated cover")
+    else
+        long_cover:writePNG(string.format("%s/long_title_generated_cover_%d.png", out_dir, book_id))
+        long_cover:free()
+    end
+end
+long_screen:onCloseWidget()
+
 -- Every year of the fake history shows a different profile, and none overflows.
 local Stats = require("book_rewind/stats")
 local fake_profiles = {}
+local wildcard_ids, wildcards_seen = {}, {}
+for _, wildcard in ipairs(require("book_rewind/wildcards").ORDER) do
+    wildcard_ids[wildcard] = true
+end
 local all_years = open_screen{ db_path = fake_db, covers_db = no_covers, language = "pt" }
 for _, fake_year in ipairs(all_years.years) do
     all_years:open_year(fake_year)
@@ -443,14 +495,19 @@ for _, fake_year in ipairs(all_years.years) do
         all_years.strings = I18n[lang]
         all_years:rebuild_cards()
         for index, card in ipairs(all_years.cards) do
-            if card.id == "archetype" or card.id == "previous" then
-                all_years:show_card(index)
-                all_years:paintTo(Screen.bb, 0, 0)
-                if all_years.overflow then problem(string.format("profile of %d overflows in %s", fake_year, lang)) end
+            all_years:show_card(index)
+            all_years:paintTo(Screen.bb, 0, 0)
+            if all_years.overflow then problem(string.format("card %s of %d overflows in %s", card.id, fake_year, lang)) end
+            if wildcard_ids[card.id] then
+                wildcards_seen[card.id] = true
+                shot(all_years, string.format("wildcard_%s_%s", lang, card.id))
             end
         end
     end
     all_years.strings = I18n.pt
+end
+for wildcard in pairs(wildcard_ids) do
+    if not wildcards_seen[wildcard] then problem("fake history without the wildcard " .. wildcard) end
 end
 for _, id in ipairs({ "night_owl", "early_bird", "steady", "marathoner", "loyal", "weekender", "explorer", "curious" }) do
     if not fake_profiles[id] then problem("fake history without the profile " .. id) end

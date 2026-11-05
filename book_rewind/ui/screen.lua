@@ -100,6 +100,10 @@ function Screen:open_year(year)
         rows = data.rows,
         books = data.books,
         earlier_pages = data.earlier_pages,
+        earlier_reads = data.earlier_reads,
+        read_later = data.read_later,
+        last_read_before = data.last_read_before,
+        last_year_seconds = data.last_year_seconds,
         previous_seconds = data.previous_seconds,
         now = self.now,
     }
@@ -149,19 +153,21 @@ end
 -- Returns a cover scaled to fit the box, with its size, or nil. A broken cover never stops the card.
 function Screen:load_cover(book_id, max_w, max_h)
     local book = self.book_data and self.book_data[book_id]
-    if not book or not book.title or book.title == "N/A" then
+    -- The cache is searched with the title as stored, and the generated cover shows the clean one.
+    local display_title = book and Stats.clean_title(book.title, book.authors)
+    if not display_title then
         return nil
     end
     local ok, cover = pcall(Store.load_cover, self.covers_db, book.title, book.authors)
     if not ok or not cover then
-        return GeneratedCover.draw(book.title, book.authors, max_w, max_h)
+        return GeneratedCover.draw(display_title, book.authors, max_w, max_h)
     end
     local scale = math.min(max_w / cover:getWidth(), max_h / cover:getHeight())
     local w, h = math.max(1, math.floor(cover:getWidth() * scale)), math.max(1, math.floor(cover:getHeight() * scale))
     local scaled_ok, scaled = pcall(RenderImage.scaleBlitBuffer, RenderImage, cover, w, h)
     if not scaled_ok or not scaled then
         cover:free()
-        return GeneratedCover.draw(book.title, book.authors, max_w, max_h)
+        return GeneratedCover.draw(display_title, book.authors, max_w, max_h)
     end
     return scaled, w, h
 end

@@ -15,7 +15,33 @@ A year of reading as a set of cards, in the style of a yearly recap, generated o
 
 ## Cards
 
-Cover, time, pages, books, timeline of finished books, devoured book, top author, longest streak, biggest day, longest session, hours, weekday, best month, pace, comparison with the previous year, profile, summary and about. The About card is the last one, right after the summary, and stays out of the saved images.
+Cover, time, pages, books, timeline of finished books, devoured book, top author, longest streak, biggest day, longest session, hours, weekday, best month, pace, wildcards, comparison with the previous year, profile, summary and about. The About card is the last one, right after the summary, and stays out of the saved images.
+
+### Wildcards
+
+Rare cards in `wildcards.lua`, with their content in `wildcard_cards.lua` and their drawings in `ui/wildcard_paint.lua`. Each year shows up to 3, the ones that stand out the most for that reader, scored like the profile traits: 1 at the minimum and 2 at what is exceptional. Cards about pauses do not appear together, and one book does not star in two cards. A year with nothing remarkable shows none. The minimums are proposals, to be calibrated with real histories.
+
+| Card | Appears when | Score reaches 2 at |
+|---|---|---|
+| Comeback | The longest pause inside the year has 30 days or more | 120 days |
+| Back after years | At least a year without reading before this year, with at least 10 minutes in the last year read | Always 2 |
+| Waves | 3 or more pauses longer than two weeks | 8 returns |
+| The book that waited | A finished book stopped for 30 days or more | 180 days |
+| Couldn't put it down | A whole book, with 30 pages or more, in a single day | 300 pages |
+| Slow burn | A finished book that took 90 days or more | 240 days |
+| Reread | At least 90% of a book finished in an earlier year read again | Fixed at 1.7 |
+| Series run | 3 or more finished books of the same series. The `series` metadata comes first, then a volume in the title (`Vol`, `Volume`, `Livro`, `Book` or `Tomo`, with an arabic or roman number), `[Name 2]` or a final roman numeral after at least two words, then the same author with titles sharing a final parenthesis or the same two opening words. Numbers, two very short words and generic openings such as `Curso de` do not count. The name is the longest opening those titles share | 6 books |
+| Juggler | 3 or more books open at once. A pause over two weeks closes a book for this count | 8 books |
+| So close | A closed year with a book stopped between 70% and 90%, not read in later years | 90% |
+| Shortest to longest | A finished book at least 3 times longer than another | 15 times |
+| Most marked | A finished book with 10 highlights or more. The `highlights` and `notes` fields are totals for the book, not per year | 100 highlights |
+| End to end | A closed year with 5 books or more, with the first and last at least 180 days apart | Fixed at 1.02 |
+| Ritual | 20 reading days or more, with sessions starting in the same two hours on at least 65% of them | 100% |
+| Past midnight | 5 or more sessions crossing midnight | 30 sessions |
+| A day to remember | A biggest day of 3 hours or more. It takes the place of the biggest day card | 8 hours |
+| Every book's pace | Two books, with 30 pages and 30 minutes each, more than 2 times apart in time per page | 6 times |
+
+Language and categories are not used, because they depend on metadata that is often missing or unreliable.
 
 ## Visuals
 
@@ -33,9 +59,10 @@ A black and white print language, with halftone, hatching and speed lines. The d
 - **Pages:** the count uses the part of the book each page covers. The same passage counts once, even when read again at another font size.
 - **Opened book:** at least 1 minute in the year, which keeps files opened by mistake out of the lists.
 - **Read to the end:** counts in the year the history reaches 90% of the book, even if the last pages took less than 1 minute. In another year, it only counts again if 90% of the book is read again in that year; if it is only reopened, it appears on the shelf as "finished before". It does not use the book status in `.sdr` files, so a book marked as finished without being read does not count.
-- **Authors:** co-authors count separately, and `N/A` is ignored. Spellings such as `J.R.R. Tolkien` and `Tolkien, J. R. R.` count as the same person.
+- **Titles:** the cards drop what the file carries besides the title: site marks such as `[e-Livros]`, tags such as `(Portuguese Edition)` and `(Oficial)`, `Microsoft Word - `, file extensions, websites at the edges of the title and the author repeated at its start. Underscores become spaces in titles that look like file names. Cover lookups still use the title as stored.
+- **Authors:** co-authors count separately, including `;`, `&`, `and`, `with` and commas between full names. `Last, First` and names like `Cruz e Sousa` stay whole. Dates after the name are dropped, and a shorter name of at least two words inside a single longer one counts as the same person. Generic labels (`N/A`, `Unknown`, `Windows User`, `Vários Autores`), program names (`Digital Source`, `PDFCreator`), websites and names with up to 2 letters are ignored. PDFs often carry the account that made the file in this field, and that cannot be told apart from a real name. Spellings such as `J.R.R. Tolkien` and `Tolkien, J. R. R.` count as the same person.
 - **Previous year:** a year in progress is compared with the same period of the previous year. A closed year is compared with the whole previous year.
-- **Profile:** the strongest trait wins, and the next one appears as secondary ("With a touch of..."). Each trait has a minimum, worth 1 point, and an exceptional value, worth 2 and the cap, so one huge number cannot outweigh a whole year. With no trait, the profile is Curious Reader. On a tie, the first one in the table wins.
+- **Profile:** the strongest trait wins, and the next one appears as secondary ("With traits of...", in a small label right below the card). Each trait has a minimum, worth 1 point, and an exceptional value, worth 2 and the cap, so one huge number cannot outweigh a whole year. With no trait, the profile is Curious Reader. On a tie, the first one in the table wins.
 
   | Profile | Measure | Minimum | Exceptional |
   |---|---|---|---|
@@ -49,7 +76,7 @@ A black and white print language, with halftone, hatching and speed lines. The d
 
   The three time-based habits need at least 7 days of reading, because a few days do not show a habit. The effective number of authors considers those with at least 30 minutes in the year and weighs them by time: 3 equal authors give 3, and one dominant author gives close to 1. The concentration used by Loyal Reader is the inverse of that number.
 - **Devoured book:** the one with the fewest days between first and last reading, started and finished in the year, with at least 30 pages.
-- **Covers:** they come from the Cover browser cache (`bookinfo_cache.sqlite3`), looked up by title and author. A book with no cached cover gets one generated by `ui/generated_cover.lua`, with the title on top and the author at the bottom. The style comes from the title, so it is always the same for each book. Each cover is built once per opened year and released when changing the year or closing.
+- **Covers:** they come from the Cover browser cache (`bookinfo_cache.sqlite3`), looked up by title and author. A book with no cached cover gets one generated by `ui/generated_cover.lua`, with the title on top and the author at the bottom. The style comes from the title, so it is always the same for each book, and a long title shrinks or gets clipped to stay above the drawing. Each cover is built once per opened year and released when changing the year or closing.
 
 ## Limits
 
@@ -65,10 +92,13 @@ book_rewind.koplugin/
   book_rewind/
     stats.lua             metrics and profile, with no KOReader dependency
     cards.lua             content of the cards
+    wildcards.lua         which rare cards a year qualifies for
+    wildcard_cards.lua    content of the rare cards
     i18n.lua              texts in the three languages
     store.lua             database access
     ui/screen.lua         navigation and export
     ui/card_view.lua      drawing of the cards
+    ui/wildcard_paint.lua drawing of the rare cards
     ui/generated_cover.lua cover for books with none in the cache
   assets/cards/           fixed art, in two sizes
   tests/, tools/, docs/   development
@@ -81,8 +111,8 @@ book_rewind.koplugin/
 - `OUTPUT_DIR=docs/screenshots tools/koreader/run_headless.sh tools/koreader/render_readme_screens.lua`: updates the README images, from the fake history, in English and Portuguese.
 - `KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py`: draws the icon, the banner and the social preview from those images. It needs Pillow.
 - With `KOREADER_DIR` pointing to a desktop KOReader:
-  - `tools/koreader/run_emulator.sh` opens a window with a fake history, generated by `tools/koreader/fake_history.lua`, in `.ko-home/`. It has eight years, one per reader profile, with invented reading over real titles.
-  - `tools/koreader/check_all_sizes.sh` checks every card at four screen sizes, plus little reading, a single session, a missing or empty database, a book read across two years, a year in progress, a failed save, a corrupted cover, keys, the 8 profiles of the fake history, export and rotation.
+  - `tools/koreader/run_emulator.sh` opens a window with a fake history, generated by `tools/koreader/fake_history.lua`, in `.ko-home/`. It has eight years with reading, one per reader profile, with a gap year so the comeback after years shows up, and scenes that make each of the 17 wildcards appear in some year. The reading is invented, over real titles.
+  - `tools/koreader/check_all_sizes.sh` checks every card at four screen sizes, plus little reading, a single session, a missing or empty database, a book read across two years, a year in progress, a failed save, a corrupted cover, keys, the 8 profiles and the 17 wildcards of the fake history, export and rotation.
 
 In the `kindle` project, `tools/book_rewind/swap_stats.sh install|restore|status <ip>` swaps the device's statistics for the fake history, keeping the real database, and undoes the swap. It refuses to run with KOReader open. While the swap lasts, reading done on the device goes to the fake database and is lost on restore.
 

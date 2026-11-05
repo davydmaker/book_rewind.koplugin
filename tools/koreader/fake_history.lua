@@ -13,11 +13,12 @@ CREATE VIEW page_stat AS SELECT id_book, first_page + idx - 1 AS page, start_tim
 PRAGMA user_version = 20221111;
 ]]
 
--- { title, authors, pages, share of the book to read, seconds per page }. The share below 0.9 makes an abandoned book.
+-- { title, authors, pages, share of the book to read, seconds per page, series = , highlights = , notes = }.
+-- The share below 0.9 makes an abandoned book.
 local PREVIOUS_YEAR = {
     { "A Hora da Estrela", "Clarice Lispector", 88, 1, 55 },
     { "Capitães da Areia", "Jorge Amado", 280, 1, 50 },
-    { "O Hobbit", "J.R.R. Tolkien", 320, 0.4, 60 },
+    { "O Hobbit", "J.R.R. Tolkien", 320, 1, 60 },
     { "Quarto de Despejo", "Carolina Maria de Jesus", 200, 1, 55 },
 }
 local NIGHT_YEAR = {
@@ -27,14 +28,15 @@ local NIGHT_YEAR = {
 }
 local STEADY_YEAR = {
     { "Os Sertões", "Euclides da Cunha", 640, 1, 72 },
-    { "Iracema", "José de Alencar", 160, 1, 50 },
+    { "Iracema", "José de Alencar", 160, 1, 50, highlights = 84, notes = 9 },
     { "Moby Dick", "Herman Melville", 720, 0.8, 62 },
     { "Guerra e Paz", "Liev Tolstói", 1200, 0.6, 70 },
 }
 local LOYAL_YEAR = {
-    { "Helena", "Machado de Assis", 220, 1, 55 },
-    { "Quincas Borba", "Machado de Assis", 300, 1, 58 },
-    { "Esaú e Jacó", "Machado de Assis", 260, 1, 56 },
+    { "O Leão, a Feiticeira e o Guarda-Roupa", "C.S. Lewis", 180, 1, 55, series = "As Crônicas de Nárnia #1" },
+    { "Príncipe Caspian", "C.S. Lewis", 210, 1, 58, series = "As Crônicas de Nárnia #2" },
+    { "A Viagem do Peregrino da Alvorada", "C.S. Lewis", 220, 1, 56, series = "As Crônicas de Nárnia #3" },
+    { "A Cadeira de Prata", "C.S. Lewis", 230, 1, 56, series = "As Crônicas de Nárnia #4" },
     { "O Primo Basílio", "Eça de Queirós", 120, 0.5, 50 },
 }
 local EXPLORER_YEAR = {
@@ -88,7 +90,7 @@ function FakeHistory.write(path, now)
     local function book_id(book)
         local key = book[1] .. "|" .. book[2]
         if not ids[key] then
-            conn:exec(string.format("INSERT INTO book (title, authors, notes, last_open, highlights, pages, series, language, md5, total_read_time, total_read_pages) VALUES ('%s', '%s', 0, %d, 0, %d, 'N/A', 'pt', '%032x', 0, 0)", escape(book[1]), escape(book[2]), now, book[3], #ids + 1 + (ids.count or 0)))
+            conn:exec(string.format("INSERT INTO book (title, authors, notes, last_open, highlights, pages, series, language, md5, total_read_time, total_read_pages) VALUES ('%s', '%s', %d, %d, %d, %d, '%s', 'pt', '%032x', 0, 0)", escape(book[1]), escape(book[2]), book.notes or 0, now, book.highlights or 0, book[3], escape(book.series or "N/A"), #ids + 1 + (ids.count or 0)))
             ids.count = (ids.count or 0) + 1
             ids[key] = ids.count
         end
@@ -148,9 +150,9 @@ function FakeHistory.write(path, now)
     end
     local year = tonumber(os.date("%Y", now))
     local afternoon = function() return random(14, 17) end
-    read_year(year - 7, CURIOUS_YEAR, now, { reading_days = 0.05, weekend_bonus = 0, pace = 0.5, hour = afternoon })
+    read_year(year - 8, CURIOUS_YEAR, now, { reading_days = 0.06, weekend_bonus = -0.05, pace = 0.5, hour = afternoon })
     read_year(year - 6, EXPLORER_YEAR, now, { reading_days = 0.3, weekend_bonus = -0.25, pace = 0.45, hour = afternoon })
-    read_year(year - 5, LOYAL_YEAR, now, { reading_days = 0.1, weekend_bonus = 0.04, pace = 0.5, hour = afternoon })
+    read_year(year - 5, LOYAL_YEAR, now, { reading_days = 0.2, weekend_bonus = -0.02, pace = 0.55, hour = afternoon })
     read_year(year - 4, STEADY_YEAR, now, { reading_days = 0.85, weekend_bonus = 0, pace = 0.3, hour = afternoon })
     read_year(year - 3, NIGHT_YEAR, now, { reading_days = 0.2, weekend_bonus = 0.05, pace = 0.45, hour = function() return 23 end })
     read_year(year - 2, TWO_YEARS_AGO, now, {
@@ -168,6 +170,54 @@ function FakeHistory.write(path, now)
             return random() < 0.15 and 7 or 21 + random(0, 2)
         end,
     })
+
+    -- Reading scenes that the habits above do not produce, so every wildcard shows up in some year.
+    local function read_span(book, first_page, last_page, start, seconds)
+        local id = book_id(book)
+        for page = first_page, last_page do
+            local t = start + (page - first_page) * seconds
+            if t < now then
+                conn:exec(string.format("INSERT OR IGNORE INTO page_stat_data VALUES (%d, %d, %d, %d, %d)", id, page, t, seconds, book[3]))
+                rows = rows + 1
+            end
+        end
+    end
+    local function moment(wanted_year, month, day, hour, minute)
+        return os.time{ year = wanted_year, month = month, day = day, hour = hour, min = minute or 0 }
+    end
+    -- Waited for months: half a book in February, the rest in August.
+    local waited = { "Noites Brancas", "Fiódor Dostoiévski", 150 }
+    read_span(waited, 1, 70, moment(year - 6, 2, 8, 15), 50)
+    read_span(waited, 71, 150, moment(year - 6, 8, 20, 15), 50)
+    -- A whole book on one Saturday.
+    local saturday = moment(year - 2, 5, 1, 12)
+    while os.date("*t", saturday).wday ~= 7 do
+        saturday = saturday + 86400
+    end
+    read_span({ "Noite na Taverna", "Álvares de Azevedo", 150 }, 1, 150, saturday + 3600, 55)
+    -- Reading past midnight, again and again.
+    local tales = { "Histórias Extraordinárias", "Edgar Allan Poe", 900 }
+    local next_page = 1
+    for night = 1, 16 do
+        local pages = night == 16 and 200 or 45
+        read_span(tales, next_page, next_page + pages - 1, moment(year - 3, 9, night * 2, 23, 25), 60)
+        next_page = next_page + pages
+    end
+    -- A tiny book in the same year as a huge one.
+    read_span({ "A Cartomante", "Machado de Assis", 32 }, 1, 32, moment(year - 4, 6, 6, 15), 60)
+    -- One very fast book next to the slower ones.
+    read_span({ "Poemas Breves", "Paulo Leminski", 120 }, 1, 120, moment(year - 1, 4, 11, 7), 18)
+    -- Several books open at once in March.
+    for index, book in ipairs({
+        { "Contos Novos", "Mário de Andrade", 200 },
+        { "Sagarana", "João Guimarães Rosa", 260 },
+        { "Laços de Família", "Clarice Lispector", 180 },
+        { "A Hora dos Ruminantes", "José J. Veiga", 220 },
+        { "Primeiras Estórias", "João Guimarães Rosa", 200 },
+    }) do
+        read_span(book, 1, 30, moment(year, 3, 8 + index, 15), 60)
+        read_span(book, 31, 60, moment(year, 3, 18 + index, 15), 60)
+    end
     conn:exec("COMMIT")
     conn:exec("UPDATE book SET total_read_time = (SELECT COALESCE(SUM(duration), 0) FROM page_stat_data WHERE id_book = book.id), total_read_pages = (SELECT COUNT(DISTINCT page) FROM page_stat_data WHERE id_book = book.id)")
     conn:close()

@@ -94,10 +94,13 @@ function Store.load_year(path, year, now)
         end
 
         local books = {}
-        result = conn:exec("SELECT id, title, authors, pages FROM book")
+        result = conn:exec("SELECT id, title, authors, pages, series, highlights, notes FROM book")
         if result then
             for i = 1, #result[1] do
-                books[number(result[1][i])] = { title = result[2][i], authors = result[3][i], pages = number(result[4][i]) }
+                books[number(result[1][i])] = {
+                    title = result[2][i], authors = result[3][i], pages = number(result[4][i]),
+                    series = result[5][i], highlights = number(result[6][i]), notes = number(result[7][i]),
+                }
             end
         end
 
@@ -111,11 +114,35 @@ function Store.load_year(path, year, now)
             end
         end
 
+        local in_year = string.format("id_book IN (SELECT id_book FROM page_stat_data WHERE start_time >= %d AND start_time < %d)", first, after)
+        local earlier_reads = {}
+        result = conn:exec(string.format("SELECT id_book, MIN(start_time), COUNT(*) FROM page_stat_data WHERE start_time < %d AND %s GROUP BY id_book", first, in_year))
+        if result then
+            for i = 1, #result[1] do
+                earlier_reads[number(result[1][i])] = { first = number(result[2][i]), rows = number(result[3][i]) }
+            end
+        end
+
+        local read_later = {}
+        result = conn:exec(string.format("SELECT DISTINCT id_book FROM page_stat_data WHERE start_time >= %d AND %s", after, in_year))
+        if result then
+            for i = 1, #result[1] do
+                read_later[number(result[1][i])] = true
+            end
+        end
+
+        local last_read_before = single_value(conn, string.format("SELECT MAX(start_time) FROM page_stat_data WHERE start_time < %d", first))
+        local last_year_seconds = last_read_before and seconds_in_year(conn, os.date("*t", last_read_before).year) or nil
+
         local previous_first = year_bounds(year - 1)
         local previous_seconds = single_value(conn, string.format(
             "SELECT SUM(duration) FROM page_stat_data WHERE start_time >= %d AND start_time < %d",
             previous_first, previous_period_end(year, first, now or os.time())))
-        return { rows = rows, books = books, earlier_pages = earlier_pages, previous_seconds = previous_seconds or 0, year = year }
+        return {
+            rows = rows, books = books, earlier_pages = earlier_pages, earlier_reads = earlier_reads, read_later = read_later,
+            last_read_before = last_read_before, last_year_seconds = last_year_seconds,
+            previous_seconds = previous_seconds or 0, year = year,
+        }
     end)
 end
 

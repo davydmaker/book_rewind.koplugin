@@ -1,4 +1,6 @@
 local Stats = require("book_rewind/stats")
+local WildcardCards = require("book_rewind/wildcard_cards")
+local Wildcards = require("book_rewind/wildcards")
 
 local Cards = {}
 
@@ -15,6 +17,27 @@ function Cards.number(value, separator)
         grouped = grouped:sub(2)
     end
     return grouped
+end
+
+-- Long titles would push everything else off the card. Counts characters, not bytes.
+function Cards.clip(text, limit)
+    local out, count = {}, 0
+    for char in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        count = count + 1
+        if count > limit then
+            return table.concat(out):gsub("%s+$", "") .. "…"
+        end
+        out[count] = char
+    end
+    return text
+end
+
+function Cards.pace(seconds)
+    local rounded = math.floor(seconds + 0.5)
+    if rounded < 60 then
+        return string.format("%d s", rounded)
+    end
+    return string.format("%d min %d s", math.floor(rounded / 60), rounded % 60)
 end
 
 local function decimal(value, separator)
@@ -72,6 +95,23 @@ function Cards.build(metrics, opts)
         return Cards.number(value, t.thousands)
     end
     local hours = metrics.total_seconds / 3600
+    local wildcards = Wildcards.pick(metrics)
+    local chosen = {}
+    for _, candidate in ipairs(wildcards) do
+        chosen[candidate.id] = candidate
+    end
+    local wildcard_helpers = {
+        date = function(yday) return date_from_yday(year, yday, t) end,
+        month_of = function(yday) return t.months[os.date("*t", os.time{ year = year, month = 1, day = yday, hour = 12 }).month] end,
+        duration = Cards.duration,
+        pace = Cards.pace,
+        number = number,
+        clip = Cards.clip,
+        title_of = function(id)
+            local book = id and opts.books[id]
+            return book and Stats.clean_title(book.title, book.authors) or nil
+        end,
+    }
 
     add{
         id = "cover",
@@ -139,7 +179,8 @@ function Cards.build(metrics, opts)
             months_books = by_month,
         }
     end
-    if metrics.devoured then
+    local devoured_in_one_sitting = chosen.one_sitting and metrics.devoured and chosen.one_sitting.data.book.id == metrics.devoured.book.id
+    if metrics.devoured and not devoured_in_one_sitting then
         local devoured = metrics.devoured
         add{
             id = "devoured",
@@ -176,7 +217,7 @@ function Cards.build(metrics, opts)
             label = t.streak_label,
         }
     end
-    if metrics.days_read >= 2 then
+    if metrics.days_read >= 2 and not chosen.memorable_day then
         add{
             id = "best_day",
             art = "best_day",
@@ -195,7 +236,7 @@ function Cards.build(metrics, opts)
             kicker = t.session_kicker,
             big = Cards.duration(session.seconds),
             label = t.session_label,
-            body = book and book.title and book.title ~= "N/A" and book.title or nil,
+            body = book and Stats.clean_title(book.title, book.authors) or nil,
         }
     end
     if metrics.best_hour then
@@ -243,6 +284,9 @@ function Cards.build(metrics, opts)
             label = t.speed_label,
         }
     end
+    for _, candidate in ipairs(wildcards) do
+        add(WildcardCards.build(candidate, metrics, t, wildcard_helpers))
+    end
     if metrics.previous_seconds >= Cards.MIN_SECONDS then
         local change = math.floor((metrics.total_seconds - metrics.previous_seconds) * 100 / metrics.previous_seconds + 0.5)
         add{
@@ -258,14 +302,12 @@ function Cards.build(metrics, opts)
     end
     local profile = Stats.archetype(metrics)
     local profile_name, profile_reason = Cards.profile_text(profile, t)
-    if profile.secondary then
-        profile_reason = profile_reason .. " " .. string.format(t.profile_secondary, t.profiles[profile.secondary][1])
-    end
     add{
         id = "archetype",
         art = "profile_" .. profile.id,
         kicker = t.profile_kicker,
         big_text = profile_name,
+        secondary = profile.secondary and string.format(t.profile_secondary, t.profiles[profile.secondary][1]) or nil,
         body = profile_reason,
     }
     local summary = {

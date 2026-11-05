@@ -1,12 +1,19 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Font = require("ui/font")
+local Cards = require("book_rewind/cards")
+local Stats = require("book_rewind/stats")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 
 local GeneratedCover = {}
 
 local BASE_W, BASE_H = 300, 440
 local MIN_WIDTH_FOR_TEXT = 60
+local TITLE_SIZES = { 24, 20, 17, 14 }
+local LONGEST_TITLE = 70
+local LONGEST_AUTHOR = 40
+-- Where the drawing of each style starts, on the 300x440 base, so a long title stays above it.
+local TITLE_LIMIT = { [0] = 290, [1] = 370, [2] = 236, [3] = 370 }
 
 local function style_for(title)
     local sum = 0
@@ -52,8 +59,8 @@ function GeneratedCover.draw(title, authors, max_w, max_h)
         return cover, w, h
     end
     local unscale = 1000 / Device.screen:scaleBySize(1000)
-    local function text(content, face, size, y)
-        local box = TextBoxWidget:new{
+    local function text_box(content, face, size)
+        return TextBoxWidget:new{
             text = content,
             face = Font:getFace(face, size * scale * unscale),
             width = w - 2 * px(32),
@@ -61,14 +68,26 @@ function GeneratedCover.draw(title, authors, max_w, max_h)
             fgcolor = ink,
             bgcolor = paper,
         }
-        box:paintTo(cover, px(32), y)
-        box:free()
     end
-    local short_title = title:gsub(":.*$", "")
-    text(short_title, "noto/NotoSerif-Bold.ttf", 24, px(56))
+    local short_title = Cards.clip((title:gsub(":.*$", "")), LONGEST_TITLE)
+    local room = px(TITLE_LIMIT[style] - 56)
+    local box
+    for _, size in ipairs(TITLE_SIZES) do
+        if box then
+            box:free()
+        end
+        box = text_box(short_title, "noto/NotoSerif-Bold.ttf", size)
+        if box:getSize().h <= room then
+            break
+        end
+    end
+    box:paintTo(cover, px(32), px(56))
+    box:free()
     local author = type(authors) == "string" and authors:match("^[^\n]+")
-    if author and author ~= "N/A" then
-        text(author, "noto/NotoSerif-Italic.ttf", 15, px(385))
+    if Stats.clean_title(author) then
+        local author_box = text_box(Cards.clip(author, LONGEST_AUTHOR), "noto/NotoSerif-Italic.ttf", 15)
+        author_box:paintTo(cover, px(32), px(385))
+        author_box:free()
     end
     return cover, w, h
 end

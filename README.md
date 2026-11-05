@@ -28,7 +28,7 @@
 
 ## The cards
 
-Up to 18 cards tell the story of your year. Each one only appears when there is data for it, so even a short history makes a coherent sequence.
+Your year becomes a story of up to 21 cards. Each one only appears when there is data for it, so even a short history makes a coherent sequence.
 
 <table>
   <tr>
@@ -47,11 +47,24 @@ Up to 18 cards tell the story of your year. Each one only appears when there is 
 
 You also get total time and pages, your top author, the book you devoured, your biggest day, your longest session, your favorite weekday and your pace.
 
+### Wildcards
+
+Up to 3 rare cards per year, for what really stood out: a comeback after a long pause, a book read in a single day, a series run, a reread, nights past midnight and more, out of 17. A year with nothing remarkable shows none.
+
+<table>
+  <tr>
+    <td width="25%" align="center"><img src="docs/screenshots/wildcards/comeback.png" alt="Card about a long pause and the comeback"><br><sub><b>The comeback</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/wildcards/series_run.png" alt="Card about a series run with numbered books"><br><sub><b>A series run</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/wildcards/past_midnight.png" alt="Card about reading past midnight"><br><sub><b>Past midnight</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/wildcards/slow_burn.png" alt="Card about a book that took months, with a candle"><br><sub><b>A slow burn</b></sub></td>
+  </tr>
+</table>
+
 **Save Images** writes the cards as PNG files to KOReader's screenshots folder, ready to share.
 
 ## Reader profiles
 
-Every year ends with a card that describes how you read. Your strongest trait wins, and the next one shows up as a secondary touch.
+Every year ends with a card that describes how you read. Your strongest trait wins, and the next one shows up as a secondary trait.
 
 <table>
   <tr>
