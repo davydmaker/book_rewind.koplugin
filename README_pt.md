@@ -60,8 +60,6 @@ Até 3 cartões raros por ano, para o que realmente se destacou: a volta depois 
   </tr>
 </table>
 
-**Salvar Imagens** grava os cartões como PNG na pasta de capturas do KOReader, prontos para compartilhar.
-
 ## Perfis de leitura
 
 Cada ano termina com um cartão que descreve como você lê. Vence o seu traço mais forte, e o seguinte aparece como traço secundário.
@@ -81,6 +79,40 @@ Cada ano termina com um cartão que descreve como você lê. Vence o seu traço 
   </tr>
 </table>
 
+## Compartilhar
+
+**Compartilhar**, no cartão da ficha de leitura, mostra um QR code. Aponte o celular na mesma rede Wi-Fi, toque em **Permitir** no leitor, e a retrospectiva abre no navegador, sem instalar nada.
+
+<table>
+  <tr>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/share_page.png" alt="A retrospectiva no navegador do celular, com a escolha de estilo e botões para salvar"><br><sub><b>No navegador do celular</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/themes/vibrant.png" alt="Capa no tema vibrante"><br><sub><b>Vibrante</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/themes/eink.png" alt="Capa no tema para e-ink colorido"><br><sub><b>E-paper</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/pt/themes/gray.png" alt="Capa em cinza"><br><sub><b>Preto e branco</b></sub></td>
+  </tr>
+</table>
+
+- **Escolha o estilo.** Vibrante, e-paper ou preto e branco, com fundos que se mexem.
+- **Salve o que está vendo.** As imagens vêm em tamanho de story, 1080 x 1920, prontas para postar.
+
+> [!WARNING]
+> A conexão usa HTTP simples, porque um servidor local não tem certificado para oferecer. Alguém capturando o tráfego da mesma rede poderia ver a sua retrospectiva. Use o Wi-Fi de casa ou o hotspot do celular, não redes públicas.
+
+<details>
+<summary><b>O que protege o seu aparelho</b></summary>
+
+<br>
+
+- **Ligado só durante o uso.** O servidor existe enquanto a tela está aberta e para ao encerrar, ao dormir e depois de 10 minutos sem uso.
+- **Um código no endereço**, aleatório e novo a cada vez. Sem ele, toda resposta é o mesmo "não encontrado".
+- **Permissão no aparelho.** O primeiro aparelho com o código precisa do seu toque, e depois disso nenhum outro endereço é atendido.
+- **Só redes privadas.** Recusa iniciar fora de 10.x, 172.16-31.x e 192.168.x, e recusa clientes de fora.
+- **Só leitura.** Responde a `GET` e a nada mais, então nada pode ser enviado ao aparelho. Não dá para pedir um caminho de arquivo: só os cartões do ano aberto na tela.
+
+A lista completa está em [docs/design.md](docs/design.md), em inglês.
+
+</details>
+
 ## Instalação
 
 1. Baixe `book_rewind.koplugin.zip` na [última versão](https://github.com/davydmaker/book_rewind.koplugin/releases/latest).
@@ -95,7 +127,7 @@ O idioma acompanha o do KOReader: inglês, português ou espanhol. Em outros idi
 ## Seus dados ficam com você
 
 > [!NOTE]
-> O Book Rewind só lê as estatísticas do KOReader (`statistics.sqlite3`) e o cache de capas da biblioteca (`bookinfo_cache.sqlite3`), em modo somente leitura. Ele não faz conexões de rede, e nada sai do aparelho.
+> O Book Rewind só lê as estatísticas do KOReader (`statistics.sqlite3`) e o cache de capas da biblioteca (`bookinfo_cache.sqlite3`), em modo somente leitura. Ele não faz conexões com a internet. Nada sai do aparelho, a não ser que você toque em **Compartilhar**, e aí só para o aparelho que você permitir, na sua própria rede.
 
 <details>
 <summary><b>Como os números funcionam</b></summary>
@@ -116,7 +148,7 @@ As regras completas, com os limites de cada perfil, estão em [docs/design.md](d
 
 - Testado com o KOReader 2026.07 num Kindle básico da 10ª geração (firmware 5.18.1).
 - Layout conferido no emulador em 600x800, 758x1024, 1072x1448 e 1264x1680.
-- Feito para telas sensíveis ao toque. Em aparelhos com teclas, as de página navegam e a de voltar fecha, mas trocar de ano e salvar imagens exigem toque.
+- Feito para telas sensíveis ao toque. Em aparelhos com teclas, as de página navegam e a de voltar fecha, mas trocar de ano e compartilhar exigem toque.
 - Sempre em retrato. Aberto em paisagem, ele gira a tela e restaura a rotação ao fechar.
 
 ## Desenvolvimento
@@ -124,7 +156,7 @@ As regras completas, com os limites de cada perfil, estão em [docs/design.md](d
 Com [LuaJIT](https://luajit.org) instalado, a partir da raiz do repositório:
 
 ```sh
-luajit tests/stats_spec.lua
+for spec in tests/*_spec.lua; do luajit "$spec"; done
 ```
 
 As métricas, as demais ferramentas e o processo de publicação estão em [docs/design.md](docs/design.md), em inglês. Contribuições entram sob as mesmas licenças do projeto.

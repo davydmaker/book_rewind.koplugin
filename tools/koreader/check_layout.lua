@@ -104,70 +104,41 @@ if browsing.year ~= year then problem("tapping the next year did not go back") e
 tap(browsing, Screen:getWidth() / 2, Screen:getHeight() / 2)
 if browsing.index ~= 2 then problem("a tap outside the buttons should move forward") end
 browsing:onCloseWidget()
-local pending_export
-full.schedule = function(callback) pending_export = callback end
+-- The summary offers sharing and no longer saves images on the device.
 local summary_index
 for index, card in ipairs(full.cards) do
     if card.id == "summary" then summary_index = index end
 end
 full:show_card(summary_index)
-local save_button
+local share_button
 for _, rect in ipairs(require("book_rewind/ui/card_view").layout_buttons(full.cards[summary_index], Screen:getWidth(), Screen:getHeight())) do
-    if rect.id == "export" then save_button = rect end
+    if rect.id == "share" then share_button = rect end
 end
-local last_card = full.index
-tap(full, save_button.x + 5, save_button.y + 5)
-if not pending_export then problem("saving did not start") end
-if full.export_label ~= full.strings.saving then problem("the button does not show it is saving") end
-shot(full, "summary_saving")
-tap(full, Screen:getWidth() - 10, Screen:getHeight() / 2)
-if full.index ~= last_card then problem("a tap while saving changed the card") end
-pending_export()
-local saved = 0
-do
-    local count = 0
-    for name in require("libs/libkoreader-lfs").dir(out_dir .. "/exported") do
-        if name:find("^book_rewind_") then count = count + 1 end
-    end
-    saved = count
-end
-if saved ~= #full.cards - 1 then problem("exported " .. saved .. " of " .. (#full.cards - 1)) end
-if full.export_label ~= full.strings.saved_button(saved) then problem("the button does not confirm the save") end
-if not (full.export_footer or ""):find("exported", 1, true) then problem("the footer does not show the folder") end
-for _, entry in ipairs(UIManager._window_stack) do
-    if entry.widget ~= full and entry.widget.name == "InfoMessage" then problem("still opens a popup") end
-end
-shot(full, "summary_saved")
-if full.overflow then problem("the summary overflows after saving") end
-tap(full, Screen:getWidth() - 10, Screen:getHeight() / 2)
-if full.index ~= last_card then problem("a queued tap after saving changed the card") end
-full.ignore_input_until = nil
-local exported = io.open(string.format("%s/exported/book_rewind_%d_01.png", out_dir, year), "rb")
-if not exported then problem("exported image not found") else exported:close() end
-print("exported " .. saved .. " images")
+if not share_button then problem("the summary does not offer sharing") end
+shot(full, "summary_share")
 
--- A new save removes the images of an older one that had more cards, and nothing else.
+-- A layer has transparency where the background goes, and solid pixels where the card draws.
 do
-    local files = require("libs/libkoreader-lfs")
-    local folder = out_dir .. "/exported"
-    local function touch(name)
-        local file = io.open(folder .. "/" .. name, "wb")
-        file:write("x")
-        file:close()
+    local Blitbuffer = require("ffi/blitbuffer")
+    local CardView = require("book_rewind/ui/card_view")
+    local function solid_share(theme, w, h)
+        local bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BBRGB32)
+        CardView.paint_layer(bb, full.cards[1], { width = w, height = h, strings = full.strings, plugin_dir = plugin_dir, cover = full.cover_provider, theme = theme })
+        local data = require("ffi").cast("uint8_t*", bb.data)
+        local solid = 0
+        for i = 0, w * h - 1 do
+            if data[i * 4 + 3] == 255 then solid = solid + 1 end
+        end
+        bb:free()
+        return solid / (w * h)
     end
-    local function exists(name)
-        return files.attributes(folder .. "/" .. name, "mode") == "file"
+    for _, theme in ipairs({ "gray", "eink", "vibrant" }) do
+        local ratio = solid_share(theme, 600, 800)
+        if ratio <= 0.05 or ratio >= 0.95 then problem(string.format("the %s layer of the cover is %.2f solid", theme, ratio)) end
     end
-    local stale = string.format("book_rewind_%d_%02d.png", year, #full.cards + 5)
-    local other_year = string.format("book_rewind_%d_01.png", year - 1)
-    local unrelated = string.format("book_rewind_%d_notes.png", year)
-    touch(stale); touch(other_year); touch(unrelated)
-    if full:export_images() ~= saved then problem("the second save did not write every image") end
-    if exists(stale) then problem("an image from an older save stayed") end
-    if not exists(other_year) or not exists(unrelated) then problem("a save removed a file that is not its own") end
-    if not exists(string.format("book_rewind_%d_01.png", year)) then problem("a save removed its own image") end
-    os.remove(folder .. "/" .. other_year)
-    os.remove(folder .. "/" .. unrelated)
+    -- Painting a layer leaves the device theme working.
+    full:show_card(1)
+    shot(full, "after_layer")
 end
 
 for _, lang in ipairs({ "en", "es" }) do
@@ -208,7 +179,7 @@ end
 
 local lfs = require("libs/libkoreader-lfs")
 for _, set in ipairs({ "600", "1200" }) do
-    for _, name in ipairs({ "cover", "time", "pages", "author", "best_day", "session", "hours", "speed", "summary", "profile_night_owl", "profile_early_bird", "profile_steady", "profile_marathoner", "profile_loyal", "profile_weekender", "profile_explorer", "profile_curious" }) do
+    for _, name in ipairs({ "cover", "time", "pages", "author", "best_day", "session", "speed", "summary", "profile_night_owl", "profile_early_bird", "profile_steady", "profile_marathoner", "profile_loyal", "profile_weekender", "profile_explorer", "profile_curious" }) do
         if lfs.attributes(string.format("%s/assets/cards/%s/%s.png", plugin_dir, set, name), "mode") ~= "file" then
             problem("missing art: " .. set .. "/" .. name)
         end
@@ -232,10 +203,10 @@ for _, lang in ipairs({ "pt", "en", "es" }) do
     for _, id in ipairs({ "timeline", "devoured", "books" }) do
         if not ids[id] then problem("missing " .. id .. " with covers in " .. lang) end
     end
-    local generated = with_covers:load_cover(with_covers.metrics.books[1].id, 150, 220)
+    local generated = with_covers:load_cover(with_covers.metrics.books[1].id, 150, 220, "gray")
     if not generated then problem("the generated cover did not appear") else generated:free() end
     local with_real = open_screen{ db_path = fake_db, covers_db = covers_path, language = lang }
-    local real = with_real:load_cover(with_real.metrics.books[1].id, 100, 150)
+    local real = with_real:load_cover(with_real.metrics.books[1].id, 100, 150, "gray")
     if not real or real:getPixel(50, 75):getColor8().a ~= 0 then problem("the real cover should take priority") end
     if real then real:free() end
     with_real:onCloseWidget()
@@ -399,21 +370,6 @@ if Store.load_year(period_path, year - 1, march).previous_seconds ~= 0 then prob
 local whole = Store.load_year(period_path, year, os.time{ year = year + 1, month = 3, day = 1, hour = 12 })
 if whole.previous_seconds ~= 10800 then problem("a closed year should compare the whole year") end
 
--- Changing the year clears what the save button said.
-local two_years = open_screen{ db_path = across_path, covers_db = no_covers, language = "pt", schedule = function(callback) callback() end }
-two_years.export_label, two_years.export_footer = "17", "pasta"
-two_years:open_year(year - 2)
-if two_years.export_label or two_years.export_footer then problem("a save from another year stayed on the button") end
-
--- A failure while saving does not lock the screen.
-local failing = open_screen{ db_path = across_path, covers_db = no_covers, language = "pt", schedule = function(callback) callback() end }
-failing.export_images = function() error("disk full") end
-if not pcall(failing.start_export, failing) then problem("a save error escaped") end
-if failing.export_saving then problem("a save error locked the screen") end
-if failing.export_label ~= failing.strings.save_failed then problem("a save error did not appear on the button") end
-failing.ignore_input_until = nil
-failing:onCloseWidget()
-
 -- A corrupted cover falls back to a generated one and closes the connection.
 local broken_covers = DataStorage:getDataDir() .. "/broken_covers.sqlite3"
 os.remove(broken_covers)
@@ -422,7 +378,7 @@ broken:exec("CREATE TABLE bookinfo (title TEXT, authors TEXT, has_cover TEXT, co
 broken:exec("INSERT INTO bookinfo VALUES ('A Casa das Marés', 'Helena Vargas', 'Y', 10, 10, 1, 10, 'not a cover')")
 broken:close()
 local with_broken = open_screen{ db_path = across_path, covers_db = broken_covers, language = "pt" }
-local fallback = with_broken:load_cover(1, 100, 150)
+local fallback = with_broken:load_cover(1, 100, 150, "gray")
 if not fallback then problem("a corrupted cover should become a generated cover") else fallback:free() end
 with_broken:onCloseWidget()
 
@@ -522,7 +478,7 @@ do
     long_bb:free()
 end
 for book_id = 2, 3 do
-    local long_cover = long_screen:load_cover(book_id, 204, 300)
+    local long_cover = long_screen:load_cover(book_id, 204, 300, "gray")
     if not long_cover then
         problem("a long title should still get a generated cover")
     else

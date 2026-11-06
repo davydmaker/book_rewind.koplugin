@@ -1,11 +1,15 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Font = require("ui/font")
-local ImageWidget = require("ui/widget/imagewidget")
+local Png = require("ffi/png")
+local RenderImage = require("ui/renderimage")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 
+local ffi = require("ffi")
+
 local Cards = require("book_rewind/cards")
+local Themes = require("book_rewind/ui/themes")
 
 local Screen = Device.screen
 
@@ -14,8 +18,11 @@ local BOLD = "noto/NotoSerif-Bold.ttf"
 local ITALIC = "noto/NotoSerif-Italic.ttf"
 local SANS = "noto/NotoSans-Bold.ttf"
 local MONO = "droid/DroidSansMono.ttf"
-local BLACK, WHITE = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
-local GRAY, LIGHT, DARK = Blitbuffer.COLOR_DARK_GRAY, Blitbuffer.COLOR_GRAY, Blitbuffer.gray(0.75)
+-- What the drawing code paints with. It and the wildcards keep these tables, and each card fills them from its theme.
+local BLACK, WHITE, GRAY, LIGHT, DARK, TEXT, BACKGROUND = {}, {}, {}, {}, {}, {}, {}
+local theme = Themes.gray
+-- A shared layer is always drawn in full color, even from the gray theme, to carry its transparency.
+local rgb_mode = false
 local BASE_W, BASE_H = 600, 800
 
 local UPPER = {
@@ -28,6 +35,102 @@ local function upper(text)
 end
 
 local clip = Cards.clip
+
+local function to_color(color)
+    if rgb_mode then
+        return Blitbuffer.ColorRGB32(color[1], color[2], color[3], 255)
+    end
+    return Blitbuffer.Color8(color[1])
+end
+
+local function solid(color)
+    return { value = to_color(color) }
+end
+
+local function apply_theme(name, card, as_layer)
+    theme = Themes[name]
+    rgb_mode = theme.rgb or as_layer == true
+    local palette = Themes.palette(theme, card)
+    local ink, second = to_color(palette.ink), to_color(palette.second)
+    BLACK.value, DARK.value = ink, ink
+    GRAY.value, LIGHT.value = second, second
+    WHITE.value = to_color(palette.inner)
+    TEXT.value = to_color(palette.text)
+    BACKGROUND.value = to_color(palette.bg)
+end
+
+local function apply_plain_colors()
+    theme = Themes.gray
+    rgb_mode = false
+    BLACK.value, DARK.value, TEXT.value = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_BLACK
+    GRAY.value, LIGHT.value = Blitbuffer.COLOR_DARK_GRAY, Blitbuffer.COLOR_GRAY
+    WHITE.value, BACKGROUND.value = Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_WHITE
+end
+
+apply_plain_colors()
+
+-- Puts one color over a target that may still be transparent, through a mask of how much it covers.
+local function blend_mask(bb, mask, px, py, w, h, color)
+    local target = ffi.cast("uint8_t*", bb.data)
+    local source = ffi.cast("uint8_t*", mask.data)
+    local target_stride, source_stride = bb.stride, mask.stride
+    local r, g, b = color.r, color.g, color.b
+    local bb_w, bb_h = bb:getWidth(), bb:getHeight()
+    for y = math.max(0, -py), math.min(h, bb_h - py) - 1 do
+        local from, to = source + y * source_stride, target + (py + y) * target_stride
+        for x = math.max(0, -px), math.min(w, bb_w - px) - 1 do
+            local cover = from[x]
+            if cover > 0 then
+                local offset = (px + x) * 4
+                local below = to[offset + 3]
+                if below == 0 or cover == 255 then
+                    to[offset], to[offset + 1], to[offset + 2], to[offset + 3] = r, g, b, cover
+                else
+                    local keep = below * (255 - cover) / 255
+                    local alpha = cover + keep
+                    to[offset] = (r * cover + to[offset] * keep) / alpha
+                    to[offset + 1] = (g * cover + to[offset + 1] * keep) / alpha
+                    to[offset + 2] = (b * cover + to[offset + 2] * keep) / alpha
+                    to[offset + 3] = alpha
+                end
+            end
+        end
+    end
+end
+
+local function paint_rect(bb, x, y, w, h, color)
+    if Blitbuffer.isColor8(color) then
+        bb:paintRect(x, y, w, h, color)
+    else
+        bb:paintRectRGB32(x, y, w, h, color)
+    end
+end
+
+local function paint_border(bb, x, y, w, h, width, color)
+    if Blitbuffer.isColor8(color) then
+        bb:paintBorder(x, y, w, h, width, color)
+    else
+        bb:paintBorderRGB32(x, y, w, h, width, color)
+    end
+end
+
+local function paint_circle(bb, cx, cy, r, color, width)
+    if Blitbuffer.isColor8(color) then
+        bb:paintCircle(cx, cy, r, color, width)
+        return
+    end
+    local inner = r - (width or r)
+    for dy = -r, r do
+        local ox = math.floor(math.sqrt(r * r - dy * dy) + 0.5)
+        if inner > 0 and math.abs(dy) < inner then
+            local ix = math.floor(math.sqrt(inner * inner - dy * dy) + 0.5)
+            bb:paintRectRGB32(cx - ox, cy + dy, ox - ix, 1, color)
+            bb:paintRectRGB32(cx + ix + 1, cy + dy, ox - ix, 1, color)
+        else
+            bb:paintRectRGB32(cx - ox, cy + dy, ox * 2 + 1, 1, color)
+        end
+    end
+end
 
 local CardView = {}
 
@@ -56,19 +159,19 @@ end
 function Canvas:rect(x0, y0, x1, y1, fill, outline, border)
     local x, y, w, h = self:x(x0), self:y(y0), self:x(x1) - self:x(x0), self:y(y1) - self:y(y0)
     if fill then
-        self.bb:paintRect(x, y, w, h, fill)
+        paint_rect(self.bb, x, y, w, h, fill.value)
     end
     if outline then
-        self.bb:paintBorder(x, y, w, h, self:len(border or 2), outline)
+        paint_border(self.bb, x, y, w, h, self:len(border or 2), outline.value)
     end
 end
 
 function Canvas:disc(cx, cy, r, color)
-    self.bb:paintCircle(self:x(cx), self:y(cy), self:len(r), color)
+    paint_circle(self.bb, self:x(cx), self:y(cy), self:len(r), color.value)
 end
 
 function Canvas:ring(cx, cy, r, color, border)
-    self.bb:paintCircle(self:x(cx), self:y(cy), self:len(r), color, self:len(border))
+    paint_circle(self.bb, self:x(cx), self:y(cy), self:len(r), color.value, self:len(border))
 end
 
 -- Scanline fill. Blitbuffer has no polygons, and these are small, so this stays cheap.
@@ -79,7 +182,7 @@ function Canvas:poly(points, color)
         real[i] = { self.ox + p[1] * self.scale, self.oy + p[2] * self.scale }
         top, bottom = math.min(top, real[i][2]), math.max(bottom, real[i][2])
     end
-    for y = math.floor(top), math.ceil(bottom) do
+    for y = math.max(0, math.floor(top)), math.min(self.height - 1, math.ceil(bottom)) do
         local crossings = {}
         for i, a in ipairs(real) do
             local b = real[i % #real + 1]
@@ -92,7 +195,7 @@ function Canvas:poly(points, color)
             local x0 = math.floor(crossings[i] + 0.5)
             local width = math.floor(crossings[i + 1] + 0.5) - x0
             if width > 0 then
-                self.bb:paintRect(x0, y, width, 1, color)
+                paint_rect(self.bb, x0, y, width, 1, color.value)
             end
         end
     end
@@ -117,7 +220,7 @@ function Canvas:hatch(x0, y0, x1, y1, spacing)
     for y = top, bottom - 1 do
         local x = left + (bottom - y) % step
         while x < right do
-            self.bb:paintRect(x, y, math.min(thick, right - x), 1, BLACK)
+            paint_rect(self.bb, x, y, math.min(thick, right - x), 1, BLACK.value)
             x = x + step
         end
     end
@@ -129,12 +232,22 @@ function Canvas:dots(x0, y0, x1, y1, spacing, radius, inside)
         local x = x0 + (row % 2 == 1 and spacing / 2 or 0)
         while x <= x1 do
             if not inside or inside(x, y) then
-                self.bb:paintCircle(self:x(x), self:y(y), math.max(1, self:len(radius)), BLACK)
+                paint_circle(self.bb, self:x(x), self:y(y), math.max(1, self:len(radius)), BLACK.value)
             end
             x = x + spacing
         end
         y = y + spacing * 0.87
         row = row + 1
+    end
+end
+
+function Canvas:paint_mask(mask, px, py, w, h, value)
+    if self.transparent then
+        blend_mask(self.bb, mask, px, py, w, h, value)
+    elseif Blitbuffer.isColor8(value) then
+        self.bb:colorblitFrom(mask, px, py, 0, 0, w, h, value)
+    else
+        self.bb:colorblitFromRGB32(mask, px, py, 0, 0, w, h, value)
     end
 end
 
@@ -147,7 +260,10 @@ end
 
 -- anchor: "c" centered, "l" from the left, "r" from the right. y is the vertical center.
 function Canvas:text(x, y, text, name, size, color, anchor)
-    local widget = TextWidget:new{ text = text, face = self:face(name, size), fgcolor = color or BLACK }
+    local value = (color or TEXT).value
+    local gray = Blitbuffer.isColor8(value)
+    -- TextWidget only draws in gray, so color text goes through a mask.
+    local widget = TextWidget:new{ text = text, face = self:face(name, size), fgcolor = gray and value or Blitbuffer.COLOR_WHITE }
     local measured = widget:getSize()
     local px = self:x(x)
     if anchor == "r" then
@@ -155,7 +271,16 @@ function Canvas:text(x, y, text, name, size, color, anchor)
     elseif anchor ~= "l" then
         px = px - math.floor(measured.w / 2)
     end
-    widget:paintTo(self.bb, px, self:y(y) - math.floor(measured.h / 2))
+    local py = self:y(y) - math.floor(measured.h / 2)
+    if gray then
+        widget:paintTo(self.bb, px, py)
+    else
+        local mask = Blitbuffer.new(measured.w, measured.h, Blitbuffer.TYPE_BB8)
+        mask:paintRect(0, 0, measured.w, measured.h, Blitbuffer.COLOR_BLACK)
+        widget:paintTo(mask, 0, 0)
+        self:paint_mask(mask, px, py, measured.w, measured.h, value)
+        mask:free()
+    end
     widget:free()
 end
 
@@ -192,41 +317,111 @@ function Canvas:fit(x, y, text, name, sizes, width, color, anchor)
         end
         self:text(x, y, short, name, smallest, color, anchor)
     else
-        self:wrap(x, y - sizes[#sizes] * 0.7, text, name, sizes[#sizes], width, color, nil, sizes[#sizes] * 3)
+        self:wrap(x, y - sizes[#sizes] * 0.7, text, name, sizes[#sizes], width, color, sizes[#sizes] * 3)
     end
 end
 
-function Canvas:wrap(x, y, text, name, size, width, color, background, max_height)
+-- Always through a mask, because a text box would paint its background over the drawing behind it.
+function Canvas:wrap(x, y, text, name, size, width, color, max_height)
     local widget = TextBoxWidget:new{
         text = text,
         face = self:face(name, size),
         width = self:len(width),
         alignment = "center",
-        fgcolor = color or BLACK,
-        bgcolor = background or WHITE,
+        fgcolor = Blitbuffer.COLOR_WHITE,
+        bgcolor = Blitbuffer.COLOR_BLACK,
     }
-    local height = widget:getSize().h / self.scale
+    local measured = widget:getSize()
+    local height = measured.h / self.scale
     if max_height and height > max_height then
         self.overflow = true
     end
-    widget:paintTo(self.bb, self:x(x - width / 2), self:y(y))
+    local mask = Blitbuffer.new(measured.w, measured.h, Blitbuffer.TYPE_BB8)
+    widget:paintTo(mask, 0, 0)
     widget:free()
+    local value = ((not color or color == BLACK) and TEXT or color).value
+    self:paint_mask(mask, self:x(x - width / 2), self:y(y), measured.w, measured.h, value)
+    mask:free()
     return height
 end
 
-function Canvas:art(plugin_dir, name, dark)
-    self.bb:paintRect(0, 0, self.width, self.height, dark and BLACK or WHITE)
-    if not name then
-        return
+function Canvas:scene(layers)
+    for _, layer in ipairs(layers) do
+        for _, shape in ipairs(layer.beyond_card and {} or layer.shapes) do
+            if shape[1] == "c" then
+                local cx, cy, r = self:x(shape[2]), self:y(shape[3]), shape[4] * self.scale
+                local color = to_color(shape[5])
+                for row = math.max(0, math.floor(cy - r)), math.min(self.height - 1, math.ceil(cy + r)) do
+                    local dy = row - cy
+                    if math.abs(dy) <= r then
+                        local ox = math.floor(math.sqrt(r * r - dy * dy) + 0.5)
+                        paint_rect(self.bb, cx - ox, row, ox * 2 + 1, 1, color)
+                    end
+                end
+            elseif shape[1] == "r" then
+                self:rect(shape[2], shape[3], shape[2] + shape[4], shape[3] + shape[5], solid(shape[6]))
+            else
+                self:poly(shape[2], solid(shape[3]))
+            end
+        end
     end
+end
+
+-- Art files hold three masks in their color channels: ink in red, the second tone in green and the
+-- inner fill in blue. What none of them covers is transparent, so the background shows through.
+function Canvas:load_masks(plugin_dir, name, w, h)
     local set = self.width <= 760 and "600" or "1200"
-    local image = ImageWidget:new{
-        file = string.format("%s/assets/cards/%s/%s.png", plugin_dir, set, name),
-        width = self:len(BASE_W),
-        height = self:len(BASE_H),
-    }
-    image:paintTo(self.bb, self.ox, self.oy)
-    image:free()
+    local ok, image = Png.decodeFromFile(string.format("%s/assets/cards/%s/%s.png", plugin_dir, set, name), 3)
+    if not ok then
+        error(image)
+    end
+    local masks = Blitbuffer.new(image.width, image.height, Blitbuffer.TYPE_BBRGB24, image.data)
+    masks:setAllocated(1)
+    if image.width ~= w or image.height ~= h then
+        return RenderImage:scaleBlitBuffer(masks, w, h, true)
+    end
+    return masks
+end
+
+function Canvas:art(plugin_dir, name, palette)
+    local w, h = self:len(BASE_W), self:len(BASE_H)
+    local masks = self:load_masks(plugin_dir, name, w, h)
+    local rgb = rgb_mode
+    -- On a transparent target, the art is the first thing drawn, so it can go there directly.
+    local layer = self.transparent and self.bb or Blitbuffer.new(w, h, rgb and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8A)
+    local source, target = ffi.cast("uint8_t*", masks.data), ffi.cast("uint8_t*", layer.data)
+    local source_stride, target_stride = masks.stride, layer.stride
+    local step = rgb and 4 or 2
+    local ink, second, inner = palette.ink, palette.second, palette.inner
+    for channel = 1, rgb and 3 or 1 do
+        local c0, c1, c2 = ink[channel], second[channel], inner[channel]
+        local out = channel - 1
+        for y = 0, h - 1 do
+            local from, to = source + y * source_stride, target + y * target_stride
+            for x = 0, w - 1 do
+                local m0, m1, m2 = from[x * 3], from[x * 3 + 1], from[x * 3 + 2]
+                local alpha = m0 + m1 + m2
+                if alpha > 0 then
+                    local offset = x * step
+                    to[offset + out] = (c0 * m0 + c1 * m1 + c2 * m2) / alpha
+                    to[offset + step - 1] = alpha > 255 and 255 or alpha
+                end
+            end
+        end
+    end
+    if not self.transparent then
+        self.bb:alphablitFrom(layer, self.ox, self.oy, 0, 0, w, h)
+        layer:free()
+    end
+    masks:free()
+end
+
+function Canvas:background(plugin_dir, card)
+    paint_rect(self.bb, 0, 0, self.width, self.height, BACKGROUND.value)
+    self:scene(Themes.layers(theme, card))
+    if card.art then
+        self:art(plugin_dir, card.art, Themes.palette(theme, card))
+    end
 end
 
 -- Draws a book cover fitted inside the box. Returns false when the book has no cover. The provider owns the cover.
@@ -235,7 +430,7 @@ function Canvas:cover(provider, book_id, x, y, w, h, frame, frame_color)
         return false
     end
     local box_w, box_h = self:len(w), self:len(h)
-    local cover, cover_w, cover_h = provider(book_id, box_w, box_h)
+    local cover, cover_w, cover_h = provider(book_id, box_w, box_h, theme.name)
     if not cover then
         return false
     end
@@ -243,30 +438,58 @@ function Canvas:cover(provider, book_id, x, y, w, h, frame, frame_color)
     local py = self:y(y) + math.floor((box_h - cover_h) / 2)
     self.bb:blitFrom(cover, px, py, 0, 0, cover_w, cover_h)
     if frame then
-        self.bb:paintBorder(px, py, cover_w, cover_h, self:len(frame), frame_color or BLACK)
+        paint_border(self.bb, px, py, cover_w, cover_h, self:len(frame), (frame_color or BLACK).value)
     end
     return true
 end
 
 local function spine(c, x, base, w, h, tone)
-    c:rect(x, base - h, x + w, base, tone == "black" and BLACK or WHITE, BLACK, 2)
-    if tone == "hatch" then
-        c:hatch(x + 2, base - h + 2, x + w - 2, base - 2)
-    elseif tone == "dots" then
-        c:dots(x + 4, base - h + 4, x + w - 4, base - 4, 6, 1.7)
+    local pick = theme.spines[(math.floor(x / 7) + math.floor(h)) % #theme.spines + 1]
+    local body = solid(pick)
+    local top = base - h
+    local plain = tone ~= "hatch" and tone ~= "dots"
+    if plain then
+        c:rect(x, top, x + w, base, body)
+        c:rect(x + w - 3, top, x + w, base, solid({ math.floor(pick[1] * 0.7), math.floor(pick[2] * 0.7), math.floor(pick[3] * 0.7) }))
+        c:rect(x + 2, top + 2, x + 4, base - 2, solid({ math.min(255, pick[1] + 34), math.min(255, pick[2] + 34), math.min(255, pick[3] + 34) }))
+    else
+        c:rect(x, top, x + w, base, WHITE, body, 2)
+        if tone == "hatch" then
+            c:hatch(x + 2, top + 2, x + w - 2, base - 2)
+        else
+            c:dots(x + 4, top + 4, x + w - 4, base - 4, 6, 1.7)
+        end
     end
-    if w >= 16 then
-        local ink = tone == "black" and WHITE or BLACK
-        c:rect(x + 3, base - h + 12, x + w - 3, base - h + 15, ink)
-        c:rect(x + 3, base - h + 20, x + w - 3, base - h + 22, ink)
+    if w < 12 then
+        return
     end
+    local ink = plain and solid(theme.band) or body
+    c:rect(x + 3, top + 10, x + w - 4, top + 13, ink)
+    c:rect(x + 3, top + 17, x + w - 4, top + 18, ink)
+    c:rect(x + 3, base - 16, x + w - 4, base - 13, ink)
+    c:rect(x + 3, base - 10, x + w - 4, base - 9, ink)
+end
+
+local function cover_shelf(c)
+    local widths = { 34, 46, 28, 52, 38, 30, 48, 36, 44, 26, 50, 32, 42 }
+    local heights = { 130, 158, 118, 146, 170, 124, 152, 136, 164, 114, 142, 128, 156 }
+    local tones = { "black", "dots", "black", "black", "hatch", "black", "black", "dots", "black", "hatch", "black", "black", "black" }
+    local x, base, i = -8, 762, 0
+    while x < BASE_W do
+        local index = i % #widths + 1
+        spine(c, x, base, widths[index], heights[index], tones[index])
+        x = x + widths[index]
+        i = i + 1
+    end
+    c:rect(0, base, BASE_W, base + 5, solid(theme.spines[1]))
 end
 
 local Paint = {}
 
 function Paint.cover(c, card)
-    c:rect(40, 128, 180, 132, BLACK)
-    c:fit(40, 110, upper(card.kicker), SANS, { 20, 17, 15 }, 200, BLACK, "l")
+    cover_shelf(c)
+    c:rect(40, 128, 180, 132, TEXT)
+    c:fit(40, 110, upper(card.kicker), SANS, { 20, 17, 15 }, 200, TEXT, "l")
     local halo = 4
     for dx = -halo, halo, halo do
         for dy = -halo, halo, halo do
@@ -276,7 +499,7 @@ function Paint.cover(c, card)
     c:text(300, 330, card.big, BOLD, 165, BLACK)
     c:text(300, 452, card.label, ITALIC, 32)
     if card.body then
-        c:wrap(300, 490, card.body, SERIF, 18, 480, BLACK, WHITE, 60)
+        c:wrap(300, 490, card.body, SERIF, 18, 480, BLACK, 60)
     end
 end
 
@@ -285,7 +508,7 @@ function Paint.time(c, card)
     c:fit(300, 505, card.big, BOLD, { 66, 56, 46 }, 540, WHITE)
     c:text(300, 575, card.label, SERIF, 24, WHITE)
     if card.body then
-        c:wrap(300, 610, card.body, SERIF, 19, 500, WHITE, BLACK, 90)
+        c:wrap(300, 610, card.body, SERIF, 19, 500, WHITE, 90)
     end
 end
 
@@ -294,7 +517,7 @@ function Paint.pages(c, card)
     c:fit(300, 240, card.big, BOLD, { 94, 76, 60 }, 350, BLACK)
     c:text(300, 312, card.label, SERIF, 26)
     if card.body then
-        c:wrap(300, 620, card.body, SERIF, 24, 400, BLACK, WHITE, 120)
+        c:wrap(300, 620, card.body, SERIF, 24, 400, BLACK, 120)
     end
 end
 
@@ -399,7 +622,7 @@ function Paint.books(c, card, t, provider)
             spine(c, x, base, item.w, h, tone)
             x = x + item.w + gap
         end
-        c:rect(30, base, 570, base + 6, BLACK)
+        c:rect(30, base, 570, base + 6, solid(theme.spines[1]))
         base = base + 190
     end
     if covers_drawn > 0 then
@@ -484,7 +707,7 @@ function Paint.streak(c, card, t)
     c:line({ { left, bracket_y + 4 }, { left, bracket_y + 12 }, { right, bracket_y + 12 }, { right, bracket_y + 4 } }, BLACK, 2.4)
     local label_x = math.max(60, math.min(540, (left + right) / 2))
     c:text(label_x, bracket_y + 32, string.format(t.heat_streak, metrics.longest_streak), ITALIC, 16)
-    c:wrap(300, 572, t.heat_hint, SERIF, 19, 480, BLACK, WHITE, 70)
+    c:wrap(300, 572, t.heat_hint, SERIF, 19, 480, BLACK, 70)
     c:text(300, 690, string.format(t.heat_total, metrics.days_read), BOLD, 26)
 end
 
@@ -502,16 +725,18 @@ function Paint.session(c, card)
     c:fit(cx, cy - 18, card.big, BOLD, { 72, 60, 50, 42 }, 330)
     c:text(cx, cy + 50, card.label, SERIF, 18)
     if card.body then
-        c:wrap(cx, cy + 74, clip(card.body, 44), BOLD, 16, 270, BLACK, WHITE, 50)
+        c:wrap(cx, cy + 74, clip(card.body, 44), BOLD, 16, 270, BLACK, 50)
     end
 end
 
 function Paint.hours(c, card, t)
-    c:text(60, 100, card.kicker, ITALIC, 25, WHITE, "l")
-    c:fit(60, 158, card.big_text, BOLD, { 62, 50, 40, 32 }, 370, WHITE, "l")
-    c:fit(60, 212, card.label, SERIF, { 18, 15 }, 370, WHITE, "l")
+    local h = theme.hours[Themes.period(card.best_hour)]
+    local text, bar, best, ring = solid(h.text), solid(h.bar), solid(h.best), solid(h.ring)
+    c:text(60, 100, card.kicker, ITALIC, 25, text, "l")
+    c:fit(60, 158, card.big_text, BOLD, { 62, 50, 40, 32 }, 370, text, "l")
+    c:fit(60, 212, card.label, SERIF, { 18, 15 }, 370, text, "l")
     local cx, cy, inner, outer = 300, 490, 92, 225
-    c:ring(cx, cy, inner, WHITE, 2)
+    c:ring(cx, cy, inner, ring, 2)
     local peak = 1
     for hour = 0, 23 do
         peak = math.max(peak, card.hour_values[hour])
@@ -527,14 +752,14 @@ function Paint.hours(c, card, t)
             { cx + r1 * math.cos(angle - spread), cy + r1 * math.sin(angle - spread) },
             { cx + r1 * math.cos(angle + spread), cy + r1 * math.sin(angle + spread) },
             { cx + r0 * math.cos(angle + spread), cy + r0 * math.sin(angle + spread) },
-        }, hour == card.best_hour and WHITE or LIGHT)
+        }, hour == card.best_hour and best or bar)
     end
     for _, hour in ipairs({ 0, 6, 12, 18 }) do
         local angle = math.rad(hour * 15 - 90)
-        c:text(cx + 238 * math.cos(angle), cy + 238 * math.sin(angle), tostring(hour), SERIF, 15, WHITE)
+        c:text(cx + 238 * math.cos(angle), cy + 238 * math.sin(angle), tostring(hour), SERIF, 15, text)
     end
-    c:text(cx, cy - 14, t.hour(card.best_hour), BOLD, 40, WHITE)
-    c:text(cx, cy + 26, t.hours_center, ITALIC, 15, WHITE)
+    c:text(cx, cy - 14, t.hour(card.best_hour), BOLD, 40, text)
+    c:text(cx, cy + 26, t.hours_center, ITALIC, 15, text)
 end
 
 function Paint.weekdays(c, card)
@@ -667,11 +892,11 @@ end
 
 function Paint.archetype(c, card)
     c:text(300, 60, card.kicker, ITALIC, 24)
-    c:fit(300, 531, upper(card.big_text), BOLD, { 42, 34, 28, 22 }, 330)
+    c:fit(300, 531, upper(card.big_text), BOLD, { 42, 34, 28, 22 }, 330, BLACK)
     if card.secondary then
         c:fit(300, 603, card.secondary, ITALIC, { 16, 14, 12 }, 510)
     end
-    c:wrap(300, 622, card.body, SERIF, 20, 510, BLACK, WHITE, 130)
+    c:wrap(300, 622, card.body, SERIF, 20, 510, BLACK, 130)
 end
 
 function Paint.summary(c, card, t)
@@ -689,6 +914,9 @@ function Paint.summary(c, card, t)
     end
     c:fit(160, 581, t.stamp, SANS, { 18, 15, 13 }, 60)
     c:text(160, 602, tostring(card.year), SANS, 13)
+    c:rect(312, 562, 524, 618, WHITE, BLACK, 2)
+    c:poly({ { 330, 572 }, { 352, 572 }, { 352, 608 }, { 341, 597 }, { 330, 608 } }, BLACK)
+    c:fit(366, 590, "Book Rewind", BOLD, { 25, 22, 19 }, 148, BLACK, "l")
 end
 
 function Paint.about(c, card, t)
@@ -706,7 +934,7 @@ function Paint.about(c, card, t)
     c:text(300, 410, t.about_source, BOLD, 19)
     c:fit(300, 440, bare(meta.homepage), SERIF, { 17, 15, 13 }, 530)
     c:text(300, 496, t.about_license_title, BOLD, 19)
-    c:wrap(300, 518, t.about_license, SERIF, 16, 500, BLACK, WHITE, 120)
+    c:wrap(300, 518, t.about_license, SERIF, 16, 500, BLACK, 120)
     c:text(300, 680, t.about_warranty, ITALIC, 16)
 end
 
@@ -717,8 +945,8 @@ require("book_rewind/ui/wildcard_paint")(Paint, {
 })
 
 local function button_box(c, rect, label)
-    c:rect(rect.dx0, rect.dy0, rect.dx1, rect.dy1, WHITE, BLACK, 2)
-    c:fit((rect.dx0 + rect.dx1) / 2, (rect.dy0 + rect.dy1) / 2, label, BOLD, { 18, 15, 13 }, rect.dx1 - rect.dx0 - 12)
+    c:rect(rect.dx0, rect.dy0, rect.dx1, rect.dy1, BACKGROUND, TEXT, 2)
+    c:fit((rect.dx0 + rect.dx1) / 2, (rect.dy0 + rect.dy1) / 2, label, BOLD, { 18, 15, 13 }, rect.dx1 - rect.dx0 - 12, TEXT)
 end
 
 function CardView.layout_buttons(card, width, height)
@@ -762,9 +990,10 @@ end
 
 -- What stays on the screen when a card cannot be drawn: a short message, the way out and the position.
 function CardView.paint_error(bb, opts)
+    apply_plain_colors()
     local c = new_canvas(bb, opts.width, opts.height)
-    bb:paintRect(0, 0, opts.width, opts.height, WHITE)
-    c:wrap(300, 360, opts.strings.card_failed, SERIF, 22, 480, BLACK, WHITE)
+    bb:paintRect(0, 0, opts.width, opts.height, WHITE.value)
+    c:wrap(300, 360, opts.strings.card_failed, SERIF, 22, 480, BLACK)
     c:rect(504, 12, 590, 52, WHITE, BLACK, 2)
     c:fit(547, 32, opts.strings.close, BOLD, { 15, 13, 11 }, 78, BLACK)
     if opts.footer then
@@ -772,24 +1001,36 @@ function CardView.paint_error(bb, opts)
     end
 end
 
-function CardView.paint(bb, card, opts)
+-- The card without its background, on a transparent buffer in RGB32. A browser puts the background behind it.
+function CardView.paint_layer(bb, card, opts)
+    apply_theme(opts.theme, card, true)
     local c = new_canvas(bb, opts.width, opts.height)
-    c:art(opts.plugin_dir, card.art, card.dark)
+    c.transparent = true
+    if card.art then
+        c:art(opts.plugin_dir, card.art, Themes.palette(theme, card))
+    end
+    Paint[card.id](c, card, opts.strings, opts.cover)
+    return c.overflow
+end
+
+function CardView.paint(bb, card, opts)
+    apply_theme(opts.theme or Themes.device_theme(Screen), card)
+    local c = new_canvas(bb, opts.width, opts.height)
+    c:background(opts.plugin_dir, card)
     Paint[card.id](c, card, opts.strings, opts.cover)
     if not opts.export then
         if card.notice then
-            c:wrap(300, 490, card.notice, SERIF, 18, 480, BLACK, WHITE, 60)
+            c:wrap(300, 490, card.notice, SERIF, 18, 480, BLACK, 60)
         end
         for _, rect in ipairs(CardView.layout_buttons(card, opts.width, opts.height)) do
             button_box(c, rect, opts.button_labels and opts.button_labels[rect.id] or rect.label)
         end
-        local ink, background = card.dark and WHITE or BLACK, card.dark and BLACK or WHITE
-        c:rect(504, 12, 590, 52, background, ink, 2)
-        c:fit(547, 32, opts.strings.close, BOLD, { 15, 13, 11 }, 78, ink)
+        c:rect(504, 12, 590, 52, BACKGROUND, TEXT, 2)
+        c:fit(547, 32, opts.strings.close, BOLD, { 15, 13, 11 }, 78, TEXT)
         if opts.footer then
             local width = math.min(c:measure(opts.footer, ITALIC, 14), 560) + 16
-            c:rect(300 - width / 2, 768, 300 + width / 2, 792, background)
-            c:fit(300, 780, opts.footer, ITALIC, { 14, 12, 10 }, 560, ink)
+            c:rect(300 - width / 2, 768, 300 + width / 2, 792, BACKGROUND)
+            c:fit(300, 780, opts.footer, ITALIC, { 14, 12, 10 }, 560, TEXT)
         end
     end
     return c.overflow

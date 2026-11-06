@@ -25,7 +25,6 @@ function Build.back_after_years(data, metrics, t, h)
         gap_label = data.last_year + 1 == year - 1 and tostring(year - 1) or t.year_range(data.last_year + 1, year - 1)
     end
     return {
-        dark = true,
         kicker = t.back_kicker,
         big = t.back_big(data.years),
         label = t.back_label(data.months),
@@ -72,7 +71,6 @@ function Build.one_sitting(data, _, t, h)
     local book = data.book
     local started, ended = os.date("*t", book.first_time), os.date("*t", book.finish_time)
     return {
-        dark = true,
         kicker = t.sitting_kicker,
         book_id = book.id,
         big = t.sitting_big,
@@ -88,7 +86,6 @@ end
 function Build.slow_burn(data, _, t, h)
     local book = data.book
     return {
-        dark = true,
         kicker = t.slow_kicker,
         big = t.days_big(data.days),
         label = t.slow_label,
@@ -209,7 +206,6 @@ end
 
 function Build.past_midnight(data, _, t)
     return {
-        dark = true,
         kicker = t.midnight_kicker,
         big = t.midnight_count(data.count),
         body = t.midnight_body,

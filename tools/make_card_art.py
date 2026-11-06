@@ -1,12 +1,15 @@
 """Draws the fixed art of the cards, without any text so it works in every language.
 
+Each file holds three masks in its color channels: ink in red, the second tone in green and the inner fill
+in blue. Whatever none of them covers is transparent, so each theme can color the art over its own background.
+
 Usage: python3 -I tools/make_card_art.py   writes assets/cards/600 and assets/cards/1200
 """
 import math
 import os
 import random
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 W, H = 600, 800
@@ -18,6 +21,7 @@ class Art:
     def __init__(self, scale, background=WHITE):
         self.k = scale * SUPERSAMPLE
         self.scale = scale
+        self.background = background
         self.image = Image.new("L", (W * self.k, H * self.k), background)
         self.d = ImageDraw.Draw(self.image)
 
@@ -66,38 +70,30 @@ class Art:
         self.image.paste(ink, mask=Image.composite(layer, Image.new("L", layer.size, 0), clip))
 
     def save(self, name):
-        final = self.image.resize((W * self.scale, H * self.scale), Image.LANCZOS)
-        final = final.point(lambda v: round(v / 17) * 17)
-        directory = os.path.join(ROOT, "assets", "cards", str(W * self.scale))
-        os.makedirs(directory, exist_ok=True)
-        final.save(os.path.join(directory, name + ".png"), optimize=True)
-
-
-def spine(a, x, base, w, h, tone):
-    if tone in ("dots", "hatch"):
-        a.rect(x, base - h, x + w, base, fill=WHITE, outline=BLACK, width=2)
-        a.pattern((x + 2, base - h + 2, x + w - 2, base - 2), tone, spacing=6)
-    else:
-        a.rect(x, base - h, x + w, base, fill=tone, outline=BLACK, width=2)
-    if w >= 16:
-        ink = WHITE if tone in (BLACK, DARK) else BLACK
-        a.rect(x + 3, base - h + 12, x + w - 3, base - h + 15, fill=ink)
-        a.rect(x + 3, base - h + 20, x + w - 3, base - h + 22, fill=ink)
+        size = (W * self.scale, H * self.scale)
+        def mask(test):
+            return self.image.point(lambda v: 255 if test(v) else 0).resize(size, Image.BOX)
+        ink, second, inner = mask(lambda v: v < 68), mask(lambda v: 68 <= v < 232), mask(lambda v: v >= 232)
+        # What touches the edges in the background tone is the background itself, and tones inside the drawing stay.
+        background = (ink if self.background == BLACK else inner).point(lambda v: 255 if v > 230 else 0)
+        for corner in ((0, 0), (size[0] - 1, 0), (0, size[1] - 1), (size[0] - 1, size[1] - 1)):
+            if background.getpixel(corner) == 255:
+                ImageDraw.floodfill(background, corner, 128)
+        background = background.point(lambda v: 255 if v == 128 else 0).filter(ImageFilter.MaxFilter(5))
+        if self.background == BLACK:
+            ink = ImageChops.subtract(ink, background)
+        else:
+            inner = ImageChops.subtract(inner, background)
+        final = Image.merge("RGB", (ink, second, inner))
+        for scale in (1, 2):
+            directory = os.path.join(ROOT, "assets", "cards", str(W * scale))
+            os.makedirs(directory, exist_ok=True)
+            final.resize((W * scale, H * scale), Image.BOX).save(os.path.join(directory, name + ".png"), optimize=True)
 
 
 def cover(scale):
     a = Art(scale)
     a.pattern((220, 50, 620, 450), "dots", spacing=9, size=3.0, mask=lambda d: d.ellipse(a.s(230, 60, 610, 440), fill=255))
-    random.seed(4)
-    x, base = -8, 762
-    tones = [BLACK, "dots", WHITE, DARK, "hatch", MID, BLACK, WHITE, "dots", DARK, "hatch", BLACK, MID, WHITE, "dots", BLACK]
-    i = 0
-    while x < W:
-        w = random.randint(26, 54)
-        spine(a, x, base, w, random.randint(110, 170), tones[i % len(tones)])
-        x += w
-        i += 1
-    a.rect(0, base, W, base + 4, fill=BLACK)
     a.save("cover")
 
 
@@ -110,7 +106,9 @@ def time_art(scale):
     outline = [(cx - w, cy - h / 2), (cx + w, cy - h / 2), (cx + 7, cy), (cx + w, cy + h / 2), (cx - w, cy + h / 2), (cx - 7, cy)]
     a.line(outline + [outline[0]], fill=WHITE, width=4)
     a.pattern((cx - w, cy + h * 0.12, cx + w, cy + h / 2), "dots", ink=WHITE, spacing=6, size=1.9, mask=lambda d: d.polygon(a.s(cx, cy + h * 0.12, cx + w - 5, cy + h / 2 - 2, cx - w + 5, cy + h / 2 - 2), fill=255))
-    a.pattern((cx - w, cy - h / 2, cx + w, cy - h * 0.1), "dots", ink=WHITE, spacing=6, size=1.9, mask=lambda d: d.polygon(a.s(cx - w + 18, cy - h * 0.26, cx + w - 18, cy - h * 0.26, cx, cy - 6), fill=255))
+    sand_y = cy - h * 0.26
+    sand_half = 7 + (w - 7) * (cy - sand_y) / (h / 2) - 5
+    a.pattern((cx - w, cy - h / 2, cx + w, cy - 6), "dots", ink=WHITE, spacing=6, size=1.9, mask=lambda d: d.polygon(a.s(cx - sand_half, sand_y, cx + sand_half, sand_y, cx + 6, cy - 6, cx - 6, cy - 6), fill=255))
     a.line([(cx, cy - 2), (cx, cy + h * 0.13)], fill=WHITE, width=2)
     a.save("time")
 
@@ -173,17 +171,6 @@ def session(scale):
         burst.append((cx + r * math.cos(t), cy + r * math.sin(t) * 0.92))
     a.poly(burst, fill=WHITE, outline=BLACK, width=4)
     a.save("session")
-
-
-def hours(scale):
-    a = Art(scale, BLACK)
-    random.seed(9)
-    for _ in range(46):
-        a.circle(random.uniform(10, 590), random.uniform(60, 770), random.choice((1, 1, 1.4, 2)), fill=WHITE)
-    a.circle(490, 130, 44, fill=WHITE)
-    a.circle(470, 118, 42, fill=BLACK)
-    a.circle(300, 465, 247, fill=BLACK)
-    a.save("hours")
 
 
 def speed(scale):
@@ -283,18 +270,18 @@ def steady(a):
 
 
 def marathoner(a):
-    a.circle(390, 180, 36, fill=WHITE)
+    a.circle(426, 166, 36, fill=WHITE)
     a.poly([(285, 300), (315, 300), (470, 485), (130, 485)], fill=WHITE)
     a.line([(300, 320), (300, 345)], width=4)
     a.line([(300, 375), (300, 410)], width=5)
     a.line([(300, 440), (300, 480)], width=7)
     a.line([(134, 300), (466, 300)], fill=WHITE, width=3)
     a.line([(300, 300), (300, 170)], fill=WHITE, width=5)
-    a.rect(300, 170, 380, 222, fill=WHITE)
-    for row in range(2):
+    a.rect(300, 170, 380, 230, fill=WHITE)
+    for row in range(3):
         for col in range(4):
             if (row + col) % 2 == 0:
-                a.rect(300 + col * 20, 170 + row * 26, 320 + col * 20, 196 + row * 26, fill=BLACK)
+                a.rect(300 + col * 20, 170 + row * 20, 320 + col * 20, 190 + row * 20, fill=BLACK)
 
 
 def heart(a, cx, cy, s, fill):
@@ -360,8 +347,8 @@ PROFILES = {
 
 
 def main():
-    for scale in (1, 2):
-        for draw in (cover, time_art, pages, author, best_day, session, hours, speed, summary):
+    for scale in (2,):
+        for draw in (cover, time_art, pages, author, best_day, session, speed, summary):
             draw(scale)
         for name, draw in PROFILES.items():
             a = Art(scale)

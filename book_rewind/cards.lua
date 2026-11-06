@@ -126,7 +126,6 @@ function Cards.build(metrics, opts)
     add{
         id = "time",
         art = "time",
-        dark = true,
         kicker = t.time_kicker,
         big = Cards.duration(metrics.total_seconds),
         label = t.time_label(metrics.days_read),
@@ -242,8 +241,6 @@ function Cards.build(metrics, opts)
     if metrics.best_hour then
         add{
             id = "hours",
-            art = "hours",
-            dark = true,
             best_hour = metrics.best_hour,
             hour_values = metrics.hours,
             kicker = t.hours_kicker,
@@ -330,12 +327,12 @@ function Cards.build(metrics, opts)
         kicker = string.format(t.summary_kicker, year),
         ranks = summary,
         buttons = {
-            { id = "export", label = t.save_images },
+            { id = "share", label = t.share },
             { id = "restart", label = t.restart },
         },
     }
     if opts.meta then
-        add{ id = "about", meta = opts.meta, not_exported = true }
+        add{ id = "about", meta = opts.meta, not_shared = true }
     end
     return list
 end

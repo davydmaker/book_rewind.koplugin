@@ -15,14 +15,15 @@ local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local util = require("util")
 
 local Cards = require("book_rewind/cards")
 local CardView = require("book_rewind/ui/card_view")
 local GeneratedCover = require("book_rewind/ui/generated_cover")
+local ShareScreen = require("book_rewind/ui/share_screen")
 local I18n = require("book_rewind/i18n")
 local Stats = require("book_rewind/stats")
 local Store = require("book_rewind/store")
+local Themes = require("book_rewind/ui/themes")
 
 local Device_screen = Device.screen
 local FULL_REFRESH_EVERY = 5
@@ -36,7 +37,7 @@ local Screen = InputContainer:extend{
     db_path = nil,
     covers_db = nil,
     language = nil,
-    schedule = nil,
+    theme = nil,
     now = nil,
 }
 
@@ -64,6 +65,7 @@ function Screen:setup()
     self.width, self.height = self.dimen.w, self.dimen.h
     self.language = self.language or I18n.language_from(G_reader_settings and G_reader_settings:readSetting("language"))
     self.strings = I18n[self.language]
+    self.theme = self.theme or Themes.device_theme(Device_screen)
     self.db_path = self.db_path or (DataStorage:getSettingsDir() .. "/statistics.sqlite3")
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
@@ -84,7 +86,7 @@ function Screen:setup()
     end
     self.covers_db = self.covers_db or (DataStorage:getSettingsDir() .. "/bookinfo_cache.sqlite3")
     self.covers = {}
-    self.cover_provider = function(book_id, max_w, max_h) return self:cached_cover(book_id, max_w, max_h) end
+    self.cover_provider = function(book_id, max_w, max_h, theme) return self:cached_cover(book_id, max_w, max_h, theme) end
     self.years = Store.years(self.db_path, Cards.MIN_SECONDS)
     self.today = os.date("*t", self.now or os.time())
     self.current_year = self.today.year
@@ -106,7 +108,6 @@ end
 
 function Screen:open_year(year)
     self.year = year
-    self.export_label, self.export_footer = nil, nil
     self:free_covers()
     local data = Store.load_year(self.db_path, year, self.now)
     self.metrics = data and Stats.compute{
@@ -166,7 +167,7 @@ function Screen:rebuild_cards()
 end
 
 -- Returns a cover scaled to fit the box, with its size, or nil. A broken cover never stops the card.
-function Screen:load_cover(book_id, max_w, max_h)
+function Screen:load_cover(book_id, max_w, max_h, theme)
     local book = self.book_data and self.book_data[book_id]
     -- The cache is searched with the title as stored, and the generated cover shows the clean one.
     local display_title = book and Stats.clean_title(book.title, book.authors)
@@ -176,24 +177,24 @@ function Screen:load_cover(book_id, max_w, max_h)
     local reader = self:cover_reader()
     local ok, cover = pcall(function() return reader and reader:load(book.title, book.authors) end)
     if not ok or not cover then
-        return GeneratedCover.draw(display_title, book.authors, max_w, max_h)
+        return GeneratedCover.draw(display_title, book.authors, max_w, max_h, Themes[theme])
     end
     local scale = math.min(max_w / cover:getWidth(), max_h / cover:getHeight())
     local w, h = math.max(1, math.floor(cover:getWidth() * scale)), math.max(1, math.floor(cover:getHeight() * scale))
     local scaled_ok, scaled = pcall(RenderImage.scaleBlitBuffer, RenderImage, cover, w, h)
     if not scaled_ok or not scaled then
         cover:free()
-        return GeneratedCover.draw(display_title, book.authors, max_w, max_h)
+        return GeneratedCover.draw(display_title, book.authors, max_w, max_h, Themes[theme])
     end
     return scaled, w, h
 end
 
 -- Cards are repainted whenever they come back to the screen, so each cover is built only once per year.
-function Screen:cached_cover(book_id, max_w, max_h)
-    local key = string.format("%s:%dx%d", tostring(book_id), max_w, max_h)
+function Screen:cached_cover(book_id, max_w, max_h, theme)
+    local key = string.format("%s:%s:%dx%d", theme, tostring(book_id), max_w, max_h)
     local entry = self.covers[key]
     if entry == nil then
-        local cover, w, h = self:load_cover(book_id, max_w, max_h)
+        local cover, w, h = self:load_cover(book_id, max_w, max_h, theme)
         entry = cover and { cover = cover, w = w, h = h } or false
         self.covers[key] = entry
     end
@@ -266,8 +267,10 @@ function Screen:footer(index)
 end
 
 function Screen:show_card(index, refresh)
-    -- Black cards leave ghosts on e-ink, so going to or from one always redraws the whole panel.
-    local crossing_dark = self.cards[index].dark or (self.index and self.cards[self.index] and self.cards[self.index].dark)
+    -- Dark cards leave ghosts on e-ink, so going to or from one always redraws the whole panel.
+    local theme = Themes[self.theme]
+    local previous = self.index and self.cards[self.index]
+    local crossing_dark = Themes.is_dark(theme, self.cards[index]) or (previous and Themes.is_dark(theme, previous))
     self.index = index
     self.shown = self.shown + 1
     local mode = refresh or ((crossing_dark or self.shown % FULL_REFRESH_EVERY == 0) and "full" or "partial")
@@ -287,10 +290,10 @@ function Screen:paintTo(bb, x, y)
         width = self.width,
         height = self.height,
         strings = self.strings,
-        footer = card.id == "summary" and self.export_footer or self:footer(self.index),
-        button_labels = { export = self.export_label },
+        footer = self:footer(self.index),
         cover = self.cover_provider,
         plugin_dir = PLUGIN_DIR,
+        theme = self.theme,
     }
     local ok, overflow = pcall(CardView.paint, bb, card, options)
     if ok then
@@ -313,90 +316,21 @@ function Screen:go(delta)
     end
 end
 
--- Saving blocks the screen for a moment. The result stays on the button, because taps made
--- during that time would dismiss a popup as soon as it appeared.
-function Screen:start_export()
-    if self.export_saving then
-        return
+function Screen:open_share()
+    local function show()
+        UIManager:show(ShareScreen:new{
+            cards = self.cards,
+            year = self.year,
+            language = self.language,
+            card_strings = self.strings,
+            plugin_dir = PLUGIN_DIR,
+            cover = self.cover_provider,
+            -- Covers at the size of a story take memory, and the next card rarely needs the same ones.
+            after_layer = function() self:free_covers() end,
+        })
     end
-    self.export_saving = true
-    self.export_label = self.strings.saving
-    self:refresh_card()
-    local schedule = self.schedule or function(callback)
-        UIManager:scheduleIn(0.2, callback)
-    end
-    schedule(function()
-        local ok, saved = pcall(self.export_images, self)
-        self.export_saving = false
-        if ok and saved > 0 then
-            self.export_label = self.strings.saved_button(saved)
-            -- The last two folders are enough to find it, and fit on the line.
-            local short_path = self.export_dir:match("([^/]+/[^/]+)/?$") or self.export_dir
-            self.export_footer = string.format(self.strings.saved_footer, short_path)
-        else
-            self.export_label = self.strings.save_failed
-            self.export_footer = nil
-        end
-        self.ignore_input_until = os.time() + 1
-        self:refresh_card()
-    end)
-end
-
-function Screen:refresh_card()
-    UIManager:setDirty(self, function()
-        return "ui", self.dimen
-    end)
-end
-
-function Screen:input_ignored()
-    return self.export_saving or (self.ignore_input_until and os.time() <= self.ignore_input_until)
-end
-
-function Screen:export_images()
-    local dir = require("ui/widget/screenshoter"):getScreenshotDir()
-    util.makePath(dir)
-    self.export_dir = dir
-    local bb = Blitbuffer.new(self.width, self.height, Blitbuffer.TYPE_BB8)
-    local saved, expected, written = 0, 0, {}
-    for index, card in ipairs(self.cards) do
-        if not card.not_exported then
-            expected = expected + 1
-            local name = string.format("book_rewind_%d_%02d.png", self.year, index)
-            local ok = pcall(function()
-                CardView.paint(bb, card, { width = self.width, height = self.height, strings = self.strings, plugin_dir = PLUGIN_DIR, export = true, cover = self.cover_provider })
-                bb:writePNG(dir .. "/" .. name)
-            end)
-            if ok then
-                saved = saved + 1
-                written[name] = true
-            end
-        end
-    end
-    bb:free()
-    -- Only after a complete save, so a failure never leaves the year with fewer images than before.
-    if saved == expected then
-        local ok, err = pcall(self.remove_stale_images, self, dir, written)
-        if not ok then
-            logger.warn("Book Rewind: could not remove older images", err)
-        end
-    end
-    return saved
-end
-
--- A year that now has fewer cards would keep the last images of an older save, mixed with the new ones.
--- Only this plugin's names for this year are touched: book_rewind_<year>_<number>.png.
-function Screen:remove_stale_images(dir, written)
-    local lfs = require("libs/libkoreader-lfs")
-    local prefix = string.format("book_rewind_%d_", self.year)
-    local stale = {}
-    for name in lfs.dir(dir) do
-        if not written[name] and name:sub(1, #prefix) == prefix and name:sub(#prefix + 1):match("^%d%d+%.png$") then
-            stale[#stale + 1] = name
-        end
-    end
-    for _, name in ipairs(stale) do
-        os.remove(dir .. "/" .. name)
-    end
+    local NetworkMgr = require("ui/network/manager")
+    NetworkMgr:runWhenConnected(show)
 end
 
 local function inside(rect, pos)
@@ -407,19 +341,15 @@ function Screen:onTap(_, ges)
     if self.mode ~= "cards" then
         return false
     end
-    if self:input_ignored() then
-        return true
-    end
     if inside(self.close_rect, ges.pos) then
         UIManager:close(self)
         return true
     end
     for _, rect in ipairs(CardView.layout_buttons(self.cards[self.index], self.width, self.height)) do
         if inside(rect, ges.pos) then
-            if rect.id == "export" then
-                self:start_export()
+            if rect.id == "share" then
+                self:open_share()
             elseif rect.id == "restart" then
-                self.export_label, self.export_footer = nil, nil
                 self:show_card(1, "full")
             elseif rect.id == "year" then
                 self:open_year(rect.year)
@@ -435,9 +365,6 @@ function Screen:onSwipe(_, ges)
     if self.mode ~= "cards" then
         return false
     end
-    if self:input_ignored() then
-        return true
-    end
     if ges.direction == "west" then
         self:go(1)
         return true
@@ -452,9 +379,7 @@ function Screen:onNextCard()
     if self.mode ~= "cards" then
         return false
     end
-    if not self:input_ignored() then
-        self:go(1)
-    end
+    self:go(1)
     return true
 end
 
@@ -462,16 +387,12 @@ function Screen:onPreviousCard()
     if self.mode ~= "cards" then
         return false
     end
-    if not self:input_ignored() then
-        self:go(-1)
-    end
+    self:go(-1)
     return true
 end
 
 function Screen:onClose()
-    if not self:input_ignored() then
-        UIManager:close(self)
-    end
+    UIManager:close(self)
     return true
 end
 

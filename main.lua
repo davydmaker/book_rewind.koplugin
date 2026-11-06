@@ -5,6 +5,7 @@ local logger = require("logger")
 
 local I18n = require("book_rewind/i18n")
 local Screen = require("book_rewind/ui/screen")
+local ShareScreen = require("book_rewind/ui/share_screen")
 
 local function strings()
     return I18n[I18n.language_from(G_reader_settings:readSetting("language"))]
@@ -15,8 +16,14 @@ local BookRewind = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+local recovered = false
+
 function BookRewind:init()
     self.ui.menu:registerToMainMenu(self)
+    if not recovered then
+        recovered = true
+        ShareScreen.recover()
+    end
 end
 
 function BookRewind:addToMainMenu(menu_items)

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A yearly reading recap for KOReader, in illustrated cards made for e-ink.<br>Offline, on your device.</strong>
+  <strong>A yearly reading recap for KOReader, in illustrated cards made for e-ink.<br>Offline, on your device. Share it with your phone when you want to.</strong>
 </p>
 
 <p align="center">
@@ -20,6 +20,7 @@
 <p align="center">
   <a href="#the-cards">The cards</a> ·
   <a href="#reader-profiles">Reader profiles</a> ·
+  <a href="#sharing">Sharing</a> ·
   <a href="#installation">Installation</a> ·
   <a href="#your-data-stays-with-you">Your data</a> ·
   <a href="#development">Development</a> ·
@@ -60,8 +61,6 @@ Up to 3 rare cards per year, for what really stood out: a comeback after a long 
   </tr>
 </table>
 
-**Save Images** writes the cards as PNG files to KOReader's screenshots folder, ready to share.
-
 ## Reader profiles
 
 Every year ends with a card that describes how you read. Your strongest trait wins, and the next one shows up as a secondary trait.
@@ -81,6 +80,40 @@ Every year ends with a card that describes how you read. Your strongest trait wi
   </tr>
 </table>
 
+## Sharing
+
+**Share**, on the summary card, shows a QR code. Point your phone at it on the same Wi-Fi network, tap **Allow** on the e-reader, and your recap opens in the browser, with nothing to install.
+
+<table>
+  <tr>
+    <td width="25%" align="center"><img src="docs/screenshots/share_page.png" alt="The recap in a phone browser, with a choice of style and buttons to save"><br><sub><b>In your phone's browser</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/themes/vibrant.png" alt="Cover in the vibrant theme"><br><sub><b>Vibrant</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/themes/eink.png" alt="Cover in the theme for color e-ink"><br><sub><b>E-paper</b></sub></td>
+    <td width="25%" align="center"><img src="docs/screenshots/themes/gray.png" alt="Cover in gray"><br><sub><b>Black and white</b></sub></td>
+  </tr>
+</table>
+
+- **Choose a style.** Vibrant, e-paper or black and white, with backgrounds that move.
+- **Save what you see.** Images come in story size, 1080x1920, ready to post.
+
+> [!WARNING]
+> The connection is plain HTTP, because a local server has no certificate to offer. Someone capturing traffic on the same network could see your recap. Use your home Wi-Fi or your phone's hotspot, not public networks.
+
+<details>
+<summary><b>What protects your device</b></summary>
+
+<br>
+
+- **Only on while in use.** The server exists while the screen is open, and it stops on Stop, on sleep and after 10 minutes without use.
+- **A code in the address**, random and new every time. Without it, every answer is the same "not found".
+- **Approval on the device.** The first device with the code needs your tap, and after that no other address is served.
+- **Private networks only.** It refuses to start outside 10.x, 172.16-31.x and 192.168.x, and refuses clients from outside.
+- **Read only.** It answers `GET` and nothing else, so nothing can be sent to your device. No file path can be asked for: only the cards of the year on the screen.
+
+The full list is in [docs/design.md](docs/design.md).
+
+</details>
+
 ## Installation
 
 1. Download `book_rewind.koplugin.zip` from the [latest release](https://github.com/davydmaker/book_rewind.koplugin/releases/latest).
@@ -95,7 +128,7 @@ The language follows KOReader's: English, Portuguese or Spanish. In any other la
 ## Your data stays with you
 
 > [!NOTE]
-> Book Rewind only reads KOReader's statistics (`statistics.sqlite3`) and the library's cover cache (`bookinfo_cache.sqlite3`), both read-only. It makes no network connections, and nothing leaves your device.
+> Book Rewind only reads KOReader's statistics (`statistics.sqlite3`) and the library's cover cache (`bookinfo_cache.sqlite3`), both read-only. It makes no internet connections. Nothing leaves your device unless you tap **Share**, and then only to the device you allow on your own network.
 
 <details>
 <summary><b>How the numbers work</b></summary>
@@ -116,7 +149,7 @@ The complete rules, including the thresholds of each profile, are in [docs/desig
 
 - Tested with KOReader 2026.07 on a 10th generation basic Kindle (firmware 5.18.1).
 - Layout checked in the emulator at 600x800, 758x1024, 1072x1448 and 1264x1680.
-- Made for touchscreens. On devices with keys, the page keys navigate and the back key closes, but changing the year and saving images need touch.
+- Made for touchscreens. On devices with keys, the page keys navigate and the back key closes, but changing the year and sharing need touch.
 - Always in portrait. Opened in landscape, it rotates the screen and restores the rotation on exit.
 
 ## Development
@@ -124,7 +157,7 @@ The complete rules, including the thresholds of each profile, are in [docs/desig
 With [LuaJIT](https://luajit.org) installed, from the repository root:
 
 ```sh
-luajit tests/stats_spec.lua
+for spec in tests/*_spec.lua; do luajit "$spec"; done
 ```
 
 Metrics, remaining tools and the release process are described in [docs/design.md](docs/design.md). Contributions are accepted under the project's licenses.

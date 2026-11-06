@@ -76,7 +76,7 @@ return function(Paint, tools)
             c:poly({ { right, axis - 140 }, { right + 40, axis - 128 }, { right, axis - 116 } }, BLACK)
             c:text(right + 48, axis - 126, card.flag, BOLD, 16, BLACK, "l")
         end
-        c:wrap(300, 536, card.body, SERIF, 22, 470, BLACK, WHITE, 180)
+        c:wrap(300, 536, card.body, SERIF, 22, 470, BLACK, 180)
     end
 
     function Paint.back_after_years(c, card)
@@ -107,7 +107,7 @@ return function(Paint, tools)
     function Paint.waves(c, card, t)
         c:text(300, 96, card.kicker, ITALIC, 25)
         c:fit(300, 186, card.big, BOLD, { 92, 76, 60 }, 540)
-        c:wrap(300, 244, card.body, SERIF, 21, 480, BLACK, WHITE, 90)
+        c:wrap(300, 244, card.body, SERIF, 21, 480, BLACK, 90)
         local base, top = 690, 440
         local total = days_in_year(card.year)
         local weeks, peak = {}, 1
@@ -209,8 +209,8 @@ return function(Paint, tools)
         c:hatch(cx - 44, top + 10, cx - 12, base, 7)
         c:poly({ { cx + 16, top + 8 }, { cx + 44, top + 8 }, { cx + 44, top + 78 }, { cx + 30, top + 92 }, { cx + 16, top + 66 } }, LIGHT)
         c:rect(cx - 76, base, cx + 76, base + 18, WHITE)
-        local height = c:wrap(400, 370, clip(card.title, 44), BOLD, 28, 280, WHITE, BLACK, 150)
-        c:wrap(400, 386 + height, card.body, SERIF, 21, 280, WHITE, BLACK, 130)
+        local height = c:wrap(400, 370, clip(card.title, 44), BOLD, 28, 280, WHITE, 150)
+        c:wrap(400, 386 + height, card.body, SERIF, 21, 280, WHITE, 130)
     end
 
     function Paint.reread(c, card, _, provider)
@@ -371,9 +371,9 @@ return function(Paint, tools)
         c:text(130, base - 268, card.short_pages, BOLD, 52)
         c:text(130, base - 226, card.short_word, ITALIC, 18)
         c:rect(40, base, 560, base + 7, BLACK)
-        c:wrap(130, base + 34, clip(card.short_title, 30), BOLD, 20, 210, BLACK, WHITE, 60)
+        c:wrap(130, base + 34, clip(card.short_title, 30), BOLD, 20, 210, BLACK, 60)
         c:text(130, base + 112, card.short_label, ITALIC, 17)
-        c:wrap(418, base + 34, clip(card.long_title, 30), BOLD, 20, 250, BLACK, WHITE, 60)
+        c:wrap(418, base + 34, clip(card.long_title, 30), BOLD, 20, 250, BLACK, 60)
         c:text(418, base + 112, card.long_label, ITALIC, 17)
         c:fit(300, 690, card.foot, SERIF, { 21, 18, 15 }, 540)
     end
@@ -427,7 +427,7 @@ return function(Paint, tools)
     function Paint.ritual(c, card)
         c:text(300, 84, card.kicker, ITALIC, 26)
         c:fit(300, 170, card.big, BOLD, { 92, 76, 60 }, 540)
-        c:wrap(300, 226, card.body, SERIF, 22, 470, BLACK, WHITE, 90)
+        c:wrap(300, 226, card.body, SERIF, 22, 470, BLACK, 90)
         local cx, cy, r = 300, 520, 176
         c:disc(cx, cy, r, WHITE)
         c:ring(cx, cy, r, BLACK, 7)
@@ -459,7 +459,7 @@ return function(Paint, tools)
         c:fit(60, 110, card.kicker, ITALIC, { 26, 22, 18 }, 330, WHITE, "l")
         c:text(300, 292, "00:00", BOLD, 118, WHITE)
         c:fit(300, 386, card.big, BOLD, { 46, 38 }, 540, WHITE)
-        c:wrap(300, 420, card.body, SERIF, 22, 470, WHITE, BLACK, 70)
+        c:wrap(300, 420, card.body, SERIF, 22, 470, WHITE, 70)
         local base = 640
         c:line({ { 0, base }, { 120, base - 54 }, { 230, base - 22 }, { 340, base - 62 }, { 470, base - 18 }, { 600, base - 48 } }, WHITE, 3)
         c:poly({ { 300, base - 118 }, { 300, base - 10 }, { 226, base - 24 }, { 226, base - 132 } }, WHITE)
@@ -486,7 +486,7 @@ return function(Paint, tools)
         cover_or_block(c, card.book_id, provider, 340, 118, 204, 298)
         c:fit(300, 488, card.big, BOLD, { 78, 64, 50 }, 540)
         c:fit(300, 556, card.label, SERIF, { 24, 20, 17 }, 540)
-        c:wrap(300, 596, card.body, SERIF, 21, 470, BLACK, WHITE, 120)
+        c:wrap(300, 596, card.body, SERIF, 21, 470, BLACK, 120)
     end
 
     function Paint.pace_change(c, card)
@@ -511,6 +511,6 @@ return function(Paint, tools)
         end
         lane(290, card.fast_title, card.fast_value, card.fast_label, true)
         lane(560, card.slow_title, card.slow_value, card.slow_label, false)
-        c:wrap(300, 628, card.foot, SERIF, 19, 520, BLACK, WHITE, 90)
+        c:wrap(300, 628, card.foot, SERIF, 19, 520, BLACK, 90)
     end
 end

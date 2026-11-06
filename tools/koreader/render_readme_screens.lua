@@ -24,13 +24,15 @@ FakeHistory.write(db, os.time{ year = year, month = 11, day = 15, hour = 12 })
 local WANTED = { "cover", "books", "timeline", "streak", "hours", "months", "previous", "summary" }
 local WILDCARDS = { comeback = true, series_run = true, past_midnight = true, slow_burn = true }
 local bb = Blitbuffer.new(Device.screen:getWidth(), Device.screen:getHeight(), Blitbuffer.TYPE_BB8)
+local color_bb = Blitbuffer.new(Device.screen:getWidth(), Device.screen:getHeight(), Blitbuffer.TYPE_BBRGB32)
 
-local function save(screen, card, path)
-    CardView.paint(bb, card, {
-        width = bb:getWidth(), height = bb:getHeight(), strings = screen.strings,
-        plugin_dir = plugin_dir, export = true, cover = screen.cover_provider,
+local function save(screen, card, path, theme)
+    local target = theme and color_bb or bb
+    CardView.paint(target, card, {
+        width = target:getWidth(), height = target:getHeight(), strings = screen.strings,
+        plugin_dir = plugin_dir, export = true, cover = screen.cover_provider, theme = theme or "gray",
     })
-    bb:writePNG(path)
+    target:writePNG(path)
 end
 
 -- A closed year, so the cards read as a finished recap.
@@ -39,7 +41,12 @@ for _, language in ipairs({ "en", "pt" }) do
     local folder = language == "en" and out_dir or (out_dir .. "/" .. language)
     util.makePath(folder .. "/profiles")
     util.makePath(folder .. "/wildcards")
-    local screen = Screen:new{ db_path = db, covers_db = DataStorage:getDataDir() .. "/none.sqlite3", language = language, now = after_the_year }
+    local screen = Screen:new{ db_path = db, covers_db = DataStorage:getDataDir() .. "/none.sqlite3", language = language, now = after_the_year, theme = "gray" }
+    util.makePath(folder .. "/themes")
+    for _, name in ipairs({ "eink", "vibrant" }) do
+        save(screen, screen.cards[1], folder .. "/themes/" .. name .. ".png", name)
+    end
+    save(screen, screen.cards[1], folder .. "/themes/gray.png")
     for _, id in ipairs(WANTED) do
         for _, card in ipairs(screen.cards) do
             if card.id == id then
@@ -60,5 +67,6 @@ for _, language in ipairs({ "en", "pt" }) do
     screen:onCloseWidget()
 end
 bb:free()
+color_bb:free()
 assert(lfs.attributes(out_dir .. "/pt/profiles/curious.png", "mode") == "file", "the Curious Reader image is missing")
 os.exit(0)

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0]
+
+- Three themes: gray for black and white screens, a palette tuned for color e-ink, and a vibrant one for phones. Your device picks its own.
+- Every card now has its own background, with shapes that fit its subject: stars, clouds, pages, hills. All themes share the same art.
+- The hours card changes with your favorite time of day: morning and afternoon have the sun instead of the moon.
+- **Share** replaces **Save Images**. It shows a QR code, and a browser on the same Wi-Fi network gets your recap, with moving backgrounds and a choice of theme. Saved images come in story size, 1080x1920. Nothing is stored on the e-reader anymore, and images saved by older versions stay where they are.
+- New drawings for book spines and generated covers. The summary card carries a Book Rewind seal, and the warranty line on the About card is clearer.
+- Fixed the sand of the hourglass, which crossed the glass, and the checkered flag of the Marathoner, which now has true squares.
+
 ## [1.1.1]
 
 - A book opened again after it was finished keeps the day it reached the end. Before, looking something up months later moved it in the timeline, made the devoured book take longer, and could create a slow burn or a book that waited.
