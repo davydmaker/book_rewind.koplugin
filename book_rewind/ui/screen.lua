@@ -12,6 +12,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local RenderImage = require("ui/renderimage")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
+local ffiUtil = require("ffi/util")
 local logger = require("logger")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -26,8 +27,8 @@ local Store = require("book_rewind/store")
 local Themes = require("book_rewind/ui/themes")
 
 local Device_screen = Device.screen
-local FULL_REFRESH_EVERY = 5
 local NEW_YEAR_DAYS = 30
+local DOUBLE_FLASH_SETTING = "book_rewind_double_flash"
 local PLUGIN_DIR = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("/book_rewind/ui/screen%.lua$", "")
 
 local Screen = InputContainer:extend{
@@ -66,6 +67,9 @@ function Screen:setup()
     self.language = self.language or I18n.language_from(G_reader_settings and G_reader_settings:readSetting("language"))
     self.strings = I18n[self.language]
     self.theme = self.theme or Themes.device_theme(Device_screen)
+    -- KOReader only uses the color waveforms of a color panel for content marked as dithered.
+    self.dithered = self.theme == "eink"
+    self.double_flash = G_reader_settings:isTrue(DOUBLE_FLASH_SETTING)
     self.db_path = self.db_path or (DataStorage:getSettingsDir() .. "/statistics.sqlite3")
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
@@ -130,8 +134,7 @@ function Screen:open_year(year)
     self.book_data = data.books
     self:rebuild_cards()
     self.mode = "cards"
-    self.shown = 0
-    self:show_card(1, "full")
+    self:show_card(1)
 end
 
 function Screen:rebuild_cards()
@@ -266,16 +269,23 @@ function Screen:footer(index)
     return string.format(self.strings.position, index, #self.cards)
 end
 
-function Screen:show_card(index, refresh)
-    -- Dark cards leave ghosts on e-ink, so going to or from one always redraws the whole panel.
-    local theme = Themes[self.theme]
-    local previous = self.index and self.cards[self.index]
-    local crossing_dark = Themes.is_dark(theme, self.cards[index]) or (previous and Themes.is_dark(theme, previous))
+-- One flash can leave the edges of a high-contrast card, so the panel can go through white first, as KOReader does before a screensaver image.
+function Screen:clear_panel()
+    if not self.double_flash or not Device:hasEinkScreen() then
+        return
+    end
+    Device_screen.bb:fill(Blitbuffer.COLOR_WHITE)
+    Device_screen:refreshFull(0, 0, self.width, self.height)
+    if Device:isKobo() and Device:isSunxi() then
+        ffiUtil.usleep(150 * 1000)
+    end
+end
+
+function Screen:show_card(index)
     self.index = index
-    self.shown = self.shown + 1
-    local mode = refresh or ((crossing_dark or self.shown % FULL_REFRESH_EVERY == 0) and "full" or "partial")
+    self:clear_panel()
     UIManager:setDirty(self, function()
-        return mode, self.dimen
+        return "full", self.dimen
     end)
 end
 
@@ -294,6 +304,8 @@ function Screen:paintTo(bb, x, y)
         cover = self.cover_provider,
         plugin_dir = PLUGIN_DIR,
         theme = self.theme,
+        flash_option = Device:hasEinkScreen(),
+        double_flash = self.double_flash,
     }
     local ok, overflow = pcall(CardView.paint, bb, card, options)
     if ok then
@@ -337,6 +349,15 @@ local function inside(rect, pos)
     return pos.x >= rect.x and pos.x < rect.x + rect.w and pos.y >= rect.y and pos.y < rect.y + rect.h
 end
 
+function Screen:toggle_double_flash(rect)
+    self.double_flash = not self.double_flash
+    G_reader_settings:saveSetting(DOUBLE_FLASH_SETTING, self.double_flash)
+    local region = Geom:new(rect)
+    UIManager:setDirty(self, function()
+        return "ui", region
+    end)
+end
+
 function Screen:onTap(_, ges)
     if self.mode ~= "cards" then
         return false
@@ -345,12 +366,19 @@ function Screen:onTap(_, ges)
         UIManager:close(self)
         return true
     end
+    if self.cards[self.index].id == "cover" and Device:hasEinkScreen() then
+        local option = CardView.flash_option_rect(self.width, self.height, self.strings)
+        if inside(option, ges.pos) then
+            self:toggle_double_flash(option)
+            return true
+        end
+    end
     for _, rect in ipairs(CardView.layout_buttons(self.cards[self.index], self.width, self.height)) do
         if inside(rect, ges.pos) then
             if rect.id == "share" then
                 self:open_share()
             elseif rect.id == "restart" then
-                self:show_card(1, "full")
+                self:show_card(1)
             elseif rect.id == "year" then
                 self:open_year(rect.year)
             end

@@ -238,6 +238,19 @@ test("all three languages have the same texts", function()
     end
 end)
 
+test("no text names a brand of e-reader, since the plugin runs on many", function()
+    local function check(from, path)
+        for key, value in pairs(from) do
+            if type(value) == "table" then
+                check(value, path .. "." .. key)
+            else
+                assert(not value:lower():find("kindle", 1, true), path .. "." .. key .. " names the Kindle")
+            end
+        end
+    end
+    check(Strings, "strings")
+end)
+
 -- A connection that hands out what was queued, and keeps what it receives.
 local function fake_client(ip, input)
     local client = { ip = ip, input = input or "", output = {}, closed = false }

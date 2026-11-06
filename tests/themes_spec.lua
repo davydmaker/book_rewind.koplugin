@@ -135,12 +135,5 @@ test("a card missing from the list still gets colors and a scene", function()
     assert(#Themes.layers(Themes.gray, { id = "future_card" }) > 0)
 end)
 
-test("dark backgrounds are told apart from light ones", function()
-    eq(Themes.is_dark(Themes.gray, { id = "time" }), true)
-    eq(Themes.is_dark(Themes.gray, { id = "books" }), false)
-    eq(Themes.is_dark(Themes.gray, { id = "hours", best_hour = 22 }), true)
-    eq(Themes.is_dark(Themes.gray, { id = "hours", best_hour = 8 }), false)
-end)
-
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

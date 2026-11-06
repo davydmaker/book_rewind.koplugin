@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0]
+
+- **Save all** on the share page saves every card together in a zip file.
+- Every card now redraws the whole screen with a flash, to reduce the ghost of the previous card.
+- A checkbox on the cover flashes the screen twice on each card, for screens where one flash still leaves marks.
+- On color e-ink, cards use the color modes of the screen, the same KOReader uses for covers.
+- Texts on the share page and screen say "e-reader" instead of "Kindle".
+- On the summary card, "Author" and "Month" are now "Top author" and "Best month".
+
 ## [1.2.0]
 
 - Three themes: gray for black and white screens, a palette tuned for color e-ink, and a vibrant one for phones. Your device picks its own.

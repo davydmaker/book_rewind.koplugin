@@ -94,7 +94,7 @@ Every year ends with a card that describes how you read. Your strongest trait wi
 </table>
 
 - **Choose a style.** Vibrant, e-paper or black and white, with backgrounds that move.
-- **Save what you see.** Images come in story size, 1080x1920, ready to post.
+- **Save one or all.** Images come in story size, 1080x1920, ready to post, one at a time or all together in a zip file.
 
 > [!WARNING]
 > The connection is plain HTTP, because a local server has no certificate to offer. Someone capturing traffic on the same network could see your recap. Use your home Wi-Fi or your phone's hotspot, not public networks.
@@ -151,6 +151,7 @@ The complete rules, including the thresholds of each profile, are in [docs/desig
 - Layout checked in the emulator at 600x800, 758x1024, 1072x1448 and 1264x1680.
 - Made for touchscreens. On devices with keys, the page keys navigate and the back key closes, but changing the year and sharing need touch.
 - Always in portrait. Opened in landscape, it rotates the screen and restores the rotation on exit.
+- Each card flashes the screen once. If you still see marks from the previous card, the checkbox on the cover makes it flash twice.
 
 ## Development
 

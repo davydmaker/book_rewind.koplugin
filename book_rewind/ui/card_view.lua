@@ -988,6 +988,26 @@ function CardView.close_rect(width, height)
     return { x = c:x(504), y = c:y(8), w = c:x(592) - c:x(504), h = c:y(56) - c:y(8) }
 end
 
+local FLASH_LABEL_X = 50
+
+local function flash_option_right(c, strings)
+    return FLASH_LABEL_X + math.min(c:measure(strings.double_flash, BOLD, 15), 436) + 10
+end
+
+function CardView.flash_option_rect(width, height, strings)
+    local c = new_canvas(nil, width, height)
+    return { x = c:x(0), y = c:y(0), w = c:x(flash_option_right(c, strings)), h = c:y(60) }
+end
+
+local function paint_flash_option(c, strings, checked)
+    c:rect(10, 12, flash_option_right(c, strings), 52, BACKGROUND, TEXT, 2)
+    c:rect(18, 20, 42, 44, BACKGROUND, TEXT, 2)
+    if checked then
+        c:poly({ { 21, 31 }, { 24, 28 }, { 28, 33 }, { 38, 22 }, { 41, 25 }, { 28, 39 } }, TEXT)
+    end
+    c:fit(FLASH_LABEL_X, 32, strings.double_flash, BOLD, { 15, 13, 11 }, 436, TEXT, "l")
+end
+
 -- What stays on the screen when a card cannot be drawn: a short message, the way out and the position.
 function CardView.paint_error(bb, opts)
     apply_plain_colors()
@@ -1027,6 +1047,9 @@ function CardView.paint(bb, card, opts)
         end
         c:rect(504, 12, 590, 52, BACKGROUND, TEXT, 2)
         c:fit(547, 32, opts.strings.close, BOLD, { 15, 13, 11 }, 78, TEXT)
+        if opts.flash_option and card.id == "cover" then
+            paint_flash_option(c, opts.strings, opts.double_flash)
+        end
         if opts.footer then
             local width = math.min(c:measure(opts.footer, ITALIC, 14), 560) + 16
             c:rect(300 - width / 2, 768, 300 + width / 2, 792, BACKGROUND)

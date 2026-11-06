@@ -93,7 +93,7 @@ Cada ano termina com um cartão que descreve como você lê. Vence o seu traço 
 </table>
 
 - **Escolha o estilo.** Vibrante, e-paper ou preto e branco, com fundos que se mexem.
-- **Salve o que está vendo.** As imagens vêm em tamanho de story, 1080 x 1920, prontas para postar.
+- **Salve uma ou todas.** As imagens vêm em tamanho de story, 1080 x 1920, prontas para postar, uma de cada vez ou todas juntas em um arquivo zip.
 
 > [!WARNING]
 > A conexão usa HTTP simples, porque um servidor local não tem certificado para oferecer. Alguém capturando o tráfego da mesma rede poderia ver a sua retrospectiva. Use o Wi-Fi de casa ou o hotspot do celular, não redes públicas.
@@ -150,6 +150,7 @@ As regras completas, com os limites de cada perfil, estão em [docs/design.md](d
 - Layout conferido no emulador em 600x800, 758x1024, 1072x1448 e 1264x1680.
 - Feito para telas sensíveis ao toque. Em aparelhos com teclas, as de página navegam e a de voltar fecha, mas trocar de ano e compartilhar exigem toque.
 - Sempre em retrato. Aberto em paisagem, ele gira a tela e restaura a rotação ao fechar.
+- Cada cartão pisca a tela uma vez. Se ainda aparecerem marcas do cartão anterior, o checkbox na capa faz a tela piscar duas vezes.
 
 ## Desenvolvimento
 

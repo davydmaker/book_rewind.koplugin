@@ -143,10 +143,76 @@
       ctx.drawImage(image, 0, MARGIN, STORY_W, STORY_H - 2 * MARGIN);
       return new Promise(function (resolve, reject) {
         canvas.toBlob(function (blob) {
+          // Safari holds on to the memory of a canvas until it is emptied, which adds up over a whole deck.
+          canvas.width = canvas.height = 0;
           if (blob) { resolve(blob); } else { reject(new Error("blob")); }
         }, "image/png");
       });
     });
+  }
+
+  var CRC_TABLE = (function () {
+    var table = new Uint32Array(256);
+    for (var n = 0; n < 256; n += 1) {
+      var c = n;
+      for (var k = 0; k < 8; k += 1) { c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; }
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    var c = 0xffffffff;
+    for (var i = 0; i < bytes.length; i += 1) { c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8); }
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  // The fields a local header and a central directory entry have in common. No compression: PNG already is.
+  function zipFields(file, stamp) {
+    var view = new DataView(new ArrayBuffer(26));
+    view.setUint16(0, 20, true);
+    view.setUint16(4, 0, true);
+    view.setUint16(6, stamp.time, true);
+    view.setUint16(8, stamp.date, true);
+    view.setUint32(10, file.crc, true);
+    view.setUint32(14, file.blob.size, true);
+    view.setUint32(18, file.blob.size, true);
+    view.setUint16(22, file.name.length, true);
+    return view.buffer;
+  }
+
+  function zipRecord(signature, length) {
+    var view = new DataView(new ArrayBuffer(length));
+    view.setUint32(0, signature, true);
+    return view;
+  }
+
+  // files: { name (ASCII), blob, crc }. The images stay blobs, so the browser does not need them all in memory.
+  function zipBlob(files) {
+    var now = new Date();
+    var stamp = {
+      time: now.getHours() << 11 | now.getMinutes() << 5 | now.getSeconds() >> 1,
+      date: (now.getFullYear() - 1980) << 9 | (now.getMonth() + 1) << 5 | now.getDate(),
+    };
+    var encoder = new TextEncoder();
+    var body = [], directory = [], offset = 0, directorySize = 0;
+    files.forEach(function (file) {
+      var name = encoder.encode(file.name), fields = zipFields(file, stamp);
+      body.push(zipRecord(0x04034b50, 4), fields, name, file.blob);
+      var entry = zipRecord(0x02014b50, 6);
+      entry.setUint16(4, 20, true);
+      var tail = new DataView(new ArrayBuffer(14));
+      tail.setUint32(10, offset, true);
+      directory.push(entry, fields, tail, name);
+      offset += 30 + name.length + file.blob.size;
+      directorySize += 46 + name.length;
+    });
+    var end = zipRecord(0x06054b50, 22);
+    end.setUint16(8, files.length, true);
+    end.setUint16(10, files.length, true);
+    end.setUint32(12, directorySize, true);
+    end.setUint32(16, offset, true);
+    return new Blob(body.concat(directory, [end]), { type: "application/zip" });
   }
 
   function download(blob, name) {
@@ -177,20 +243,52 @@
     }
   }
 
-  function save() {
+  function setBusy(on) {
+    busy = on;
+    ui.save.disabled = ui.saveAll.disabled = on;
+    Array.prototype.forEach.call(ui.seg.children, function (button) { button.disabled = on; });
+  }
+
+  function saving(task) {
     if (busy) { return; }
-    var deck = decks[theme], position = index;
-    busy = true;
-    ui.save.disabled = true;
-    setStatus(text().loading);
-    storyBlob(deck, position).then(function (blob) {
-      download(blob, imageName(deck, position));
+    setBusy(true);
+    task().then(function () {
       setStatus(text().saved, true);
     }).catch(function () {
       setStatus(text().failed, true);
     }).then(function () {
-      busy = false;
-      ui.save.disabled = false;
+      setBusy(false);
+    });
+  }
+
+  function save() {
+    var deck = decks[theme], position = index;
+    saving(function () {
+      setStatus(text().loading);
+      return storyBlob(deck, position).then(function (blob) {
+        download(blob, imageName(deck, position));
+      });
+    });
+  }
+
+  // One at a time, because the device draws each image when asked. What it already drew comes back at once,
+  // so trying again after a failure continues where it stopped.
+  function saveAll() {
+    var deck = decks[theme], total = deck.cards.length, files = [];
+    function collect(position) {
+      if (position === total) { return Promise.resolve(); }
+      setStatus(text().loading_all.replace("{done}", position + 1).replace("{total}", total));
+      return storyBlob(deck, position).then(function (blob) {
+        return blob.arrayBuffer().then(function (buffer) {
+          files.push({ name: imageName(deck, position), blob: blob, crc: crc32(new Uint8Array(buffer)) });
+          return collect(position + 1);
+        });
+      });
+    }
+    saving(function () {
+      return collect(0).then(function () {
+        download(zipBlob(files), "book_rewind_" + deck.year + "_" + deck.theme + ".zip");
+      });
     });
   }
 
@@ -219,16 +317,17 @@
     ui.scene.textContent = "";
     ui.scene.appendChild(sceneSvg(card));
     ui.image.removeAttribute("src");
-    setStatus(text().loading);
+    // While saving, the status belongs to the progress, and the card can still be flipped through.
+    if (!busy) { setStatus(text().loading); }
     var position = index, shown = theme;
     loadImage(layerUrl(shown, position, "preview")).then(function (image) {
       if (token !== showToken) { return; }
       ui.image.src = image.src;
-      setStatus("");
-      // One at a time ahead of the reader, because the Kindle draws them when asked.
+      if (!busy) { setStatus(""); }
+      // One at a time ahead of the reader, because the device draws them when asked.
       if (position + 1 < deck.cards.length) { loadImage(layerUrl(shown, position + 1, "preview")).catch(function () {}); }
     }).catch(function () {
-      if (token === showToken) { setStatus(text().failed); }
+      if (token === showToken && !busy) { setStatus(text().failed); }
     });
     renderBars(deck);
   }
@@ -289,7 +388,10 @@
     ui.save = el("button", "save", t.save);
     ui.save.type = "button";
     ui.save.addEventListener("click", save);
-    controls.append(ui.seg, ui.save);
+    ui.saveAll = el("button", "save", t.save_all);
+    ui.saveAll.type = "button";
+    ui.saveAll.addEventListener("click", saveAll);
+    controls.append(ui.seg, ui.save, ui.saveAll);
     app.append(ui.stage, controls);
     document.addEventListener("keydown", function (e) {
       if (e.key === "ArrowRight") { go(1); }

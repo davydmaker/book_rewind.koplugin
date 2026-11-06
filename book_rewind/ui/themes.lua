@@ -216,10 +216,4 @@ function Themes.layers(theme, card)
     return Scenes.card((Themes.cards[card_key(card)] or FALLBACK).scene, Themes.palette(theme, card))
 end
 
--- Dark backgrounds leave ghosts on e-ink when the next card is drawn over them.
-function Themes.is_dark(theme, card)
-    local bg = Themes.palette(theme, card).bg
-    return bg[1] * 0.299 + bg[2] * 0.587 + bg[3] * 0.114 < 128
-end
-
 return Themes

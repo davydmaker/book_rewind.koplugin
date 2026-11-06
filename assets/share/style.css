@@ -23,11 +23,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hit.right{right:0;width:67%}
 .status{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);max-width:88%;background:rgba(0,0,0,.72);color:#fff;font-size:13px;padding:6px 12px;border-radius:14px;text-align:center;pointer-events:none}
 .status:empty{display:none}
-.controls{flex:none;display:flex;gap:8px;align-items:stretch;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
-.seg{flex:1 1 auto;min-width:0;display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.controls{flex:none;display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+.seg{flex:1 1 100%;min-width:0;display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .seg button{flex:1 1 0;min-width:0;border:0;border-radius:0;background:transparent;padding:4px 3px;font-size:13px}
 .seg button[aria-pressed=true]{background:var(--accent);color:#fff;font-weight:600}
-.save{flex:none;width:30%;max-width:170px;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;font-size:13px;padding:4px 6px}
+.save{flex:1 1 0;min-width:0;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;font-size:13px;padding:4px 6px}
 g{transform-box:view-box;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-direction:alternate}
 .m-none{animation:none}
 .m-drift-x{animation-name:driftx}.m-drift-x-rev{animation-name:driftxr}.m-drift-y{animation-name:drifty}

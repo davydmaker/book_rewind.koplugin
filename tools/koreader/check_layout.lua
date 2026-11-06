@@ -69,6 +69,71 @@ if full.index ~= 1 then problem("moved back before the first card") end
 full:onSwipe(nil, { direction = "west" })
 if full.index ~= 2 then problem("a swipe did not move forward") end
 
+-- On e-ink, every card redraws the whole panel, and the option on the cover makes it clear to white first.
+local CardViewForChecks = require("book_rewind/ui/card_view")
+local set_dirty, has_eink, refresh_full = UIManager.setDirty, Device.hasEinkScreen, Screen.refreshFull
+local refreshes, order = {}, {}
+UIManager.setDirty = function(_, _, refresh)
+    refreshes[#refreshes + 1] = refresh
+    order[#order + 1] = "card"
+end
+Device.hasEinkScreen = function() return true end
+Screen.refreshFull = function()
+    if Screen.bb:getPixel(0, 0):getColor8().a ~= 0xFF then problem("the panel was not white when cleared") end
+    order[#order + 1] = "clear"
+end
+local function moves()
+    refreshes, order = {}, {}
+    tap(full, Screen:getWidth() - 10, Screen:getHeight() / 2)
+    tap(full, 10, Screen:getHeight() / 2)
+    full:onSwipe(nil, { direction = "west" })
+    full:show_card(1)
+    if #refreshes ~= 4 then problem("expected a refresh for each move, got " .. #refreshes) end
+    for _, refresh in ipairs(refreshes) do
+        if refresh() ~= "full" then problem("a card did not redraw the whole panel") end
+    end
+    return table.concat(order, ",")
+end
+if full.double_flash then problem("the double flash should start off") end
+if moves() ~= "card,card,card,card" then problem("cards should not clear the panel by default") end
+
+local option = CardViewForChecks.flash_option_rect(Screen:getWidth(), Screen:getHeight(), full.strings)
+local option_x, option_y = option.x + option.w / 2, option.y + option.h / 2
+if option.x + option.w >= full.close_rect.x then problem("the flash option reaches the close button") end
+for _, language in ipairs({ "pt", "en", "es" }) do
+    local rect = CardViewForChecks.flash_option_rect(Screen:getWidth(), Screen:getHeight(), I18n[language])
+    if rect.x + rect.w >= full.close_rect.x then problem("the flash option reaches the close button in " .. language) end
+end
+full:paintTo(Screen.bb, 0, 0)
+shot(full, "flash_option_off")
+
+tap(full, option_x, option_y)
+if not full.double_flash then problem("a tap on the option did not turn it on") end
+if full.index ~= 1 then problem("a tap on the option should not change the card") end
+if G_reader_settings:isTrue("book_rewind_double_flash") ~= true then problem("the option was not saved") end
+if refreshes[#refreshes]() ~= "ui" then problem("the option should not flash the screen") end
+shot(full, "flash_option_on")
+if moves() ~= "clear,card,clear,card,clear,card,clear,card" then problem("cards should clear the panel before drawing: " .. table.concat(order, ",")) end
+if not open_screen{ db_path = db, covers_db = no_covers }.double_flash then problem("the option was not kept for the next opening") end
+
+full:show_card(2)
+tap(full, option_x, option_y)
+if not full.double_flash then problem("the option should only exist on the cover") end
+full:show_card(1)
+tap(full, option_x, option_y)
+if full.double_flash then problem("a second tap did not turn the option off") end
+
+Device.hasEinkScreen = function() return false end
+full:show_card(1)
+tap(full, option_x, option_y)
+if full.double_flash then problem("the option should not exist without e-ink") end
+UIManager.setDirty, Device.hasEinkScreen, Screen.refreshFull = set_dirty, has_eink, refresh_full
+full:show_card(1)
+G_reader_settings:delSetting("book_rewind_double_flash")
+
+if not open_screen{ db_path = db, covers_db = no_covers, theme = "eink" }.dithered then problem("the e-ink theme should ask for color waveforms") end
+if open_screen{ db_path = db, covers_db = no_covers, theme = "gray" }.dithered then problem("the gray theme should not ask for dithering") end
+
 local previous_year_buttons = 0
 for _, button in ipairs(full.cards[1].buttons or {}) do
     if button.year == year - 1 then previous_year_buttons = previous_year_buttons + 1 end
