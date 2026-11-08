@@ -1,6 +1,6 @@
-"""Draws the icon, the README banner and the GitHub social preview from the rendered cards.
+"""Draws the icon, the README banner and the GitHub social preview, or with `screensaver` the full-screen sleep screen cover in assets/ from the rendered cards.
 
-Usage: KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py
+Usage: KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py [screensaver]
 Run tools/koreader/render_readme_screens.lua first. Needs Pillow, and the Noto fonts that ship with KOReader.
 """
 import math
@@ -103,6 +103,24 @@ def draw_header(width, height, fonts, icon, layout):
     return image.resize((width, height), Image.LANCZOS)
 
 
+def draw_screensaver(fonts, icon):
+    # Laid out in 600x800 units and saved at twice that, so larger screens get a sharp image and 600x800 gets a clean halving.
+    k, w, h = 4, 600, 800
+    image = Image.new("L", (w * k, h * k), BLACK)
+    cx, cy = w // 2, 572
+    halftone(image, cx * k, cy * k, 290 * k, 26 * k)
+    place_card(image, "hours", ((cx - 118) * k, (cy + 12) * k), 290 * k, 8)
+    place_card(image, "profiles/marathoner", ((cx + 118) * k, (cy + 12) * k), 290 * k, -8)
+    place_card(image, "cover", (cx * k, cy * k), 310 * k, 0)
+    icon_size = 150
+    small = icon.resize((icon_size * k, icon_size * k), Image.LANCZOS)
+    image.paste(small.getchannel("L"), ((cx - icon_size // 2) * k, 56 * k), small.getchannel("A"))
+    d = ImageDraw.Draw(image)
+    d.text((cx * k, 222 * k), "Book Rewind", font=ImageFont.truetype(fonts["bold"], 62 * k), fill=WHITE, anchor="mt")
+    image = image.resize((w * 2, h * 2), Image.LANCZOS)
+    return image.point(lambda v: round(v / 17) * 17)
+
+
 def main():
     koreader = os.environ.get("KOREADER_DIR")
     if not koreader:
@@ -116,6 +134,11 @@ def main():
     brand = os.path.join(ROOT, "docs", "brand")
     os.makedirs(brand, exist_ok=True)
     icon = draw_icon()
+    if sys.argv[1:] == ["screensaver"]:
+        os.makedirs(os.path.join(ROOT, "assets"), exist_ok=True)
+        draw_screensaver(fonts, icon).save(os.path.join(ROOT, "assets", "screensaver.png"), optimize=True)
+        print("Image generated in assets/screensaver.png")
+        return
     icon.save(os.path.join(brand, "icon.png"), optimize=True)
     draw_header(1280, 400, fonts, icon, {"middle": 945, "card_height": 330, "offset": 170, "text": 1, "halftone": 296}).save(os.path.join(brand, "banner.png"), optimize=True)
     draw_header(1280, 640, fonts, icon, {"middle": 950, "card_height": 440, "offset": 118, "text": 1.2, "halftone": 380, "details": DETAILS}).save(os.path.join(ROOT, "docs", "social-preview.png"), optimize=True)

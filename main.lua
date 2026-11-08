@@ -4,8 +4,11 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 
 local I18n = require("book_rewind/i18n")
+local PluginScreensaver = require("book_rewind/screensaver")
 local Screen = require("book_rewind/ui/screen")
 local ShareScreen = require("book_rewind/ui/share_screen")
+
+PluginScreensaver.install(debug.getinfo(1, "S").source:gsub("^@", ""):match("(.*)/") or ".")
 
 local function strings()
     return I18n[I18n.language_from(G_reader_settings:readSetting("language"))]

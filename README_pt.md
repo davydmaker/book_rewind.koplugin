@@ -151,6 +151,7 @@ As regras completas, com os limites de cada perfil, estão em [docs/design.md](d
 - Feito para telas sensíveis ao toque. Em aparelhos com teclas, as de página navegam e a de voltar fecha, mas trocar de ano e compartilhar exigem toque.
 - Sempre em retrato. Aberto em paisagem, ele gira a tela e restaura a rotação ao fechar.
 - Cada cartão pisca a tela uma vez. Se ainda aparecerem marcas do cartão anterior, o checkbox na capa faz a tela piscar duas vezes.
+- Se o aparelho dorme com o Book Rewind aberto, aparece a capa do Book Rewind no lugar da capa do livro. Vale quando a tela de descanso do KOReader mostra a capa do livro.
 
 ## Desenvolvimento
 

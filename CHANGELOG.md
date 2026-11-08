@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.3.1]
+
+- The Book Rewind cover on the sleep screen while the plugin is open.
+
 ## [1.3.0]
 
 - **Save all** on the share page saves every card together in a zip file.

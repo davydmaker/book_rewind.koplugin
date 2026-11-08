@@ -152,6 +152,7 @@ The complete rules, including the thresholds of each profile, are in [docs/desig
 - Made for touchscreens. On devices with keys, the page keys navigate and the back key closes, but changing the year and sharing need touch.
 - Always in portrait. Opened in landscape, it rotates the screen and restores the rotation on exit.
 - Each card flashes the screen once. If you still see marks from the previous card, the checkbox on the cover makes it flash twice.
+- If the device sleeps with Book Rewind open, it shows the Book Rewind cover instead of the book cover. This applies when the KOReader sleep screen is set to show the book cover.
 
 ## Development
 
