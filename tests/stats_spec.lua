@@ -1073,5 +1073,28 @@ test("rows in columns give the same result as rows in a list", function()
     eq(#columns.start, #rows); eq(columns.book[1], rows[1][1]); eq(columns.total[#rows], rows[#rows][5])
 end)
 
+-- A book where the reader uses stable page numbers: 663 screen pages, 402 stable ones.
+local StablePages = require("book_rewind/stable_pages")
+local function stable_books(screen_total, stable_total)
+    local books = { [1] = { title = "Estável", authors = "Ana Lima", pages = screen_total, md5 = "m1" } }
+    StablePages.apply(books, { m1 = stable_total })
+    return books
+end
+test("stable page numbers count the same part of the book in stable pages", function()
+    local m = compute(pages_read(1, 1, 331, 663, at(3, 1, 8)), { books = stable_books(663, 402) })
+    eq(m.total_pages, 201)
+    eq(m.books[1].total_pages, 402)
+end)
+test("the page where a book stopped follows stable page numbers", function()
+    local rows = joined(pages_read(1, 1, 265, 663, at(2, 1, 8)), pages_read(1, 266, 663, 663, at(6, 1, 8)))
+    local found = has(compute(rows, { books = stable_books(663, 402) }), "book_waited")
+    eq(found.data.book.pause.page, 161)
+end)
+test("a book under 30 stable pages is not the devoured book, even with more screen pages", function()
+    local rows = pages_read(1, 1, 35, 35, at(4, 1, 10))
+    eq(compute(rows, { books = stable_books(35, 35) }).devoured ~= nil, true)
+    eq(compute(rows, { books = stable_books(35, 25) }).devoured, nil)
+end)
+
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -81,7 +81,7 @@ Cada ano termina com um cartão que descreve como você lê. Vence o seu traço 
 
 ## Compartilhar
 
-**Compartilhar**, no cartão da ficha de leitura, mostra um QR code. Aponte o celular na mesma rede Wi-Fi, toque em **Permitir** no leitor, e a retrospectiva abre no navegador, sem instalar nada.
+**Compartilhar**, no cartão da ficha de leitura, mostra um QR code e um endereço. Na mesma rede Wi-Fi, aponte o celular para o código ou digite o endereço em qualquer navegador, toque em **Permitir** no leitor, e a retrospectiva abre no navegador, sem instalar nada.
 
 <table>
   <tr>
@@ -127,7 +127,7 @@ O idioma acompanha o do KOReader: inglês, português ou espanhol. Em outros idi
 ## Seus dados ficam com você
 
 > [!NOTE]
-> O Book Rewind só lê as estatísticas do KOReader (`statistics.sqlite3`) e o cache de capas da biblioteca (`bookinfo_cache.sqlite3`), em modo somente leitura. Ele não faz conexões com a internet. Nada sai do aparelho, a não ser que você toque em **Compartilhar**, e aí só para o aparelho que você permitir, na sua própria rede.
+> O Book Rewind só lê as estatísticas do KOReader (`statistics.sqlite3`), o cache de capas da biblioteca (`bookinfo_cache.sqlite3`) e, para contar páginas, as configurações que o KOReader guarda de cada livro aberto no ano, tudo em modo somente leitura. Ele não faz conexões com a internet. Nada sai do aparelho, a não ser que você toque em **Compartilhar**, e aí só para o aparelho que você permitir, na sua própria rede.
 
 <details>
 <summary><b>Como os números funcionam</b></summary>
@@ -138,6 +138,7 @@ O idioma acompanha o do KOReader: inglês, português ou espanhol. Em outros idi
 - **Título e autor** vêm do arquivo. Sem título, aparece o nome do arquivo. Sem autor, o livro fica fora do cartão de autores.
 - **Livro até o fim** significa 90% do livro lido no KOReader. Conta no ano em que chega a essa marca, mesmo para um livro começado anos antes.
 - **Páginas** contam o trecho do livro que você cobriu, então reler um trecho com outro tamanho de fonte não soma duas vezes.
+- **Numeração estável:** num livro em que você ligou a numeração estável do KOReader (páginas da editora ou caracteres por página), as páginas contam nela. Os outros livros contam páginas de tela, como o KOReader mostra. Para isso, o livro precisa estar no histórico de leitura do KOReader.
 - **Capas** vêm da biblioteca do KOReader. Livros sem capa no cache ganham uma gerada na hora, com o título e o autor.
 
 As regras completas, com os limites de cada perfil, estão em [docs/design.md](docs/design.md), em inglês.

@@ -8,6 +8,7 @@ A year of reading as a set of cards, in the style of a yearly recap, generated o
 - It lives in the Tools menu, as **Book Rewind**. It opens on the most recent year with at least 10 minutes of reading, and the cover offers the neighbouring years that also reach that minimum. In the first 30 days of a year, it opens on the year that just ended, if that year reaches the minimum, and the new year stays on the button.
 - A tap on the right or a swipe moves forward. A tap on the left third moves back. On devices with keys, the page keys navigate and the back key closes; changing the year and sharing need touch.
 - It reads `koreader/settings/statistics.sqlite3` read-only. With a book open, it first writes the pages the statistics plugin still keeps in memory.
+- For page counts, it also reads, read-only, the settings KOReader keeps for each book opened in the year (see Stable page numbers in Metrics).
 - **Share**, on the summary card, opens a screen with a QR code. See [Sharing](#sharing). Nothing is written to KOReader's screenshots folder, and images saved there by older versions stay untouched.
 - If the screen cannot open, KOReader shows a short notice and the rotation is restored. If one card cannot be drawn, it shows a message in its place, and the other cards stay reachable. Both go to the KOReader log.
 - If no year has 10 minutes of reading, it shows an invitation to read more, with the minutes still missing, instead of the cards. A missing or unreadable database counts as no reading.
@@ -96,6 +97,12 @@ The page takes the whole screen of the phone: the card on top, with the progress
 
 - **Session:** ends after 5 minutes with no reading.
 - **Pages:** the count uses the part of the book each page covers. The same passage counts once, even when read again at another font size.
+- **Stable page numbers:** a book where the reader turned on KOReader's stable page numbers counts pages in them. The part of the book read stays the same, and only the book's page total changes, so every count that uses pages follows: the year, the biggest day, the devoured book, the pace, the shortest and longest books and the page where a book stopped.
+  - KOReader keeps them in each book's settings, not in the statistics: `pagemap_use_page_labels` (turned on for that book) and `pagemap_doc_pages` (the total in stable pages).
+  - The statistics have no file path, so `stable_pages.lua` walks KOReader's reading history (`ReadHistory.hist`), only the entries opened since the start of the year, opens each book's settings with `DocSettings`, which finds them next to the book, in `docsettings` or in `hashdocsettings`, and matches them to the statistics by `partial_md5_checksum`, the same partial MD5 the statistics keep. It stops once every book of the year is found. The book open in KOReader uses its settings in memory, which can be newer than the file.
+  - A book removed from the history, or without the option, counts screen pages. Anything that fails while reading the settings also keeps screen pages, with a line in the KOReader log.
+  - The match uses the checksum kept in the settings, never a new hash of the file. KOReader keeps the first checksum of a book in its settings and in the statistics, so a file replaced later (a new edition with the same name) still matches, while a new hash would not.
+  - Measured on the Kindle (KOReader v2026.07.2), with the real history and `DocSettings`: 10 to 12 ms. With a copy of a book's settings with 1500 characters per page, that book went from 42 of 6065 screen pages to 30 of 4315 stable pages, and the year from 48 to 36 pages, as expected.
 - **Opened book:** at least 1 minute in the year, which keeps files opened by mistake out of the lists.
 - **Read to the end:** counts in the year the history reaches 90% of the book, even if the last pages took less than 1 minute. In another year, it only counts again if 90% of the book is read again in that year; if it is only reopened, it appears on the shelf as "finished before". It does not use the book status in `.sdr` files, so a book marked as finished without being read does not count.
 - **When a book was finished:** the moment it reaches 90%. Opening it again later, to look something up, does not change that day, so the timeline, the devoured book, the slow burn, the book that waited, a book in one day and the series run all use it. The time a book took counts until the end of the day it was finished.
@@ -136,6 +143,7 @@ book_rewind.koplugin/
     wildcards.lua         which rare cards a year qualifies for
     wildcard_cards.lua    content of the rare cards
     i18n.lua              texts in the three languages
+    stable_pages.lua      page totals in stable page numbers, from each book's settings
     store.lua             database access
     share/access.lua      who gets what when sharing, independent from KOReader and the network
     share/server.lua      HTTP server that does not block the interface
@@ -158,6 +166,7 @@ book_rewind.koplugin/
 ## Tools
 
 - `luajit tests/stats_spec.lua`: tests for metrics and cards.
+- `luajit tests/stable_pages_spec.lua`: the rules for stable page numbers, with fake history and book settings.
 - `luajit tests/themes_spec.lua`: every card has colors and a background in every theme, and text stays readable.
 - `luajit tests/share_spec.lua`: the sharing rules, including attack attempts, and the server with fake connections.
 - `tools/package.sh`: builds the zip and the checksum, only with what the plugin uses.
@@ -165,6 +174,7 @@ book_rewind.koplugin/
 - `KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py`: draws the icon, the banner and the social preview from those images. It needs Pillow. With `screensaver` as argument it draws `assets/screensaver.png` instead, in the same style.
 - With `KOREADER_DIR` pointing to a desktop KOReader:
   - `tools/koreader/run_emulator.sh` opens a window with a fake history, generated by `tools/koreader/fake_history.lua`, in `.ko-home/`. It has eight years with reading, one per reader profile, with a gap year so the comeback after years shows up, and scenes that make each of the 17 wildcards appear in some year. The reading is invented, over real titles.
+  - `tools/koreader/run_headless.sh tools/koreader/check_stable_pages.lua` checks stable page numbers with KOReader's own history and book settings: next to the book, in the hash folder, turned off, for the book open now and for a history entry from before the year.
   - `OUTPUT_DIR=<folder> tools/koreader/run_headless.sh tools/koreader/check_screensaver.lua` checks when the plugin cover replaces the sleep screen image, on the cards and on the share screen, and saves the resulting screen.
   - `tools/koreader/check_all_sizes.sh` checks every card at four screen sizes, plus little reading, a single session, a missing or empty database, a book read across two years, a year in progress, a corrupted cover, keys, the 8 profiles and the 17 wildcards of the fake history, the transparent layers and rotation.
   - `RUN_SECONDS=600 READY_FILE=<file> tools/koreader/run_headless.sh tools/koreader/demo_share.lua` serves the share page with the fake history, approving the first device, and writes the address to that file.

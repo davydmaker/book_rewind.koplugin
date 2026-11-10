@@ -106,12 +106,13 @@ function Store.load_year(path, year, now)
         local year_books = string.format("SELECT id_book FROM page_stat_data WHERE start_time >= %d AND start_time < %d", first, after)
         local in_year = "id_book IN (" .. year_books .. ")"
         local books = {}
-        result = conn:exec("SELECT id, title, authors, pages, series, highlights, notes FROM book WHERE id IN (" .. year_books .. ")")
+        result = conn:exec("SELECT id, title, authors, pages, series, highlights, notes, md5 FROM book WHERE id IN (" .. year_books .. ")")
         if result then
             for i = 1, #result[1] do
                 books[number(result[1][i])] = {
                     title = result[2][i], authors = result[3][i], pages = number(result[4][i]),
                     series = result[5][i], highlights = number(result[6][i]), notes = number(result[7][i]),
+                    md5 = type(result[8][i]) == "string" and result[8][i] ~= "" and result[8][i] or nil,
                 }
             end
         end

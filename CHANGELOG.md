@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0]
+
+- In books where you turned on KOReader's stable page numbers, pages count in them: the year, the biggest day, the devoured book, the pace and the other cards with pages. Other books keep counting screen pages.
+
+## [1.3.2]
+
+- The share screen says the address can also be typed in any browser, on a computer too.
+
 ## [1.3.1]
 
 - The Book Rewind cover on the sleep screen while the plugin is open.
