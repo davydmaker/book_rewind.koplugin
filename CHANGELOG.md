@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.4.1]
+
+- Books marked as finished in KOReader count as read to the end when the statistics don't show them, for example after a reset: on the books card, the timeline and the summary. They need at least 90% read and to be in KOReader's reading history.
+
 ## [1.4.0]
 
 - In books where you turned on KOReader's stable page numbers, pages count in them: the year, the biggest day, the devoured book, the pace and the other cards with pages. Other books keep counting screen pages.

@@ -1096,5 +1096,58 @@ test("a book under 30 stable pages is not the devoured book, even with more scre
     eq(compute(rows, { books = stable_books(35, 25) }).devoured, nil)
 end)
 
+-- Books marked as finished in KOReader and missing from the statistics, for example after a reset.
+local Marked = require("book_rewind/marked")
+local function marked_entry(md5, modified, title)
+    return { md5 = md5, status = "complete", modified = modified, percent = 1, title = title or "Marcado", authors = "Rui Paz", doc_pages = 120 }
+end
+local function with_md5(id, md5)
+    local books = {}
+    for key, book in pairs(BOOKS) do
+        books[key] = { title = book.title, authors = book.authors, pages = book.pages }
+    end
+    books[id].md5 = md5
+    return books
+end
+test("marked books count on the books card and in the summary", function()
+    local m = compute(pages_read(1, 1, 50, 100, at(3, 1, 10)))
+    Marked.add(m, { marked_entry("x", "2026-04-15") }, BOOKS, 2026)
+    local card = card_of(m, "books")
+    eq(card.big, "2"); eq(card.body, "E chegou ao fim de 1.")
+    eq(#card.books, 2); eq(card.books[2].id < 0, true)
+    local summary = card_of(m, "summary")
+    local found = false
+    for _, row in ipairs(summary.ranks) do
+        if row.meta == "2, com 1 até o fim" then found = true end
+    end
+    eq(found, true)
+end)
+test("marked books go on the timeline in the month they were marked, even to make up its two books", function()
+    local m = compute(pages_read(1, 1, 100, 100, at(2, 1, 10)))
+    eq(card_of(m, "timeline"), nil)
+    Marked.add(m, { marked_entry("x", "2026-06-20") }, BOOKS, 2026)
+    local card = card_of(m, "timeline")
+    eq(#card.months_books[2], 1); eq(#card.months_books[6], 1); eq(card.months_books[6][1].id < 0, true)
+end)
+test("a book read in part before a reset and marked as finished is not almost finished", function()
+    local rows = pages_read(1, 1, 85, 100, at(5, 2, 10))
+    for _, row in ipairs(rows) do row[3] = 60 end
+    local books = with_md5(1, "m1")
+    local m = compute(rows, { now = AFTER_THE_YEAR, books = books })
+    eq(has(m, "almost_there") ~= nil, true)
+    Marked.add(m, { marked_entry("m1", "2026-05-20") }, books, 2026)
+    eq(has(m, "almost_there"), nil)
+    local card = card_of(m, "books")
+    eq(card.big, "1"); eq(card.body, "E chegou ao fim de 1.")
+end)
+test("marked books change no time, pages, profile or devoured book", function()
+    local rows = joined(pages_read(1, 1, 100, 100, at(2, 1, 10)), pages_read(2, 1, 60, 200, at(3, 1, 22)))
+    local m = compute(rows)
+    local seconds, pages, profile, devoured = m.total_seconds, m.total_pages, Stats.archetype(m).id, m.devoured and m.devoured.book.id
+    Marked.add(m, { marked_entry("x", "2026-04-15"), marked_entry("y", "2026-07-01", "Outro") }, BOOKS, 2026)
+    eq(m.total_seconds, seconds); eq(m.total_pages, pages); eq(Stats.archetype(m).id, profile)
+    eq(m.devoured and m.devoured.book.id, devoured)
+end)
+
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

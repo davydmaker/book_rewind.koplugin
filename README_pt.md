@@ -137,6 +137,7 @@ O idioma acompanha o do KOReader: inglês, português ou espanhol. Em outros idi
 - **Só conta o que passou pelo KOReader.** Leitura em outros apps não entra.
 - **Título e autor** vêm do arquivo. Sem título, aparece o nome do arquivo. Sem autor, o livro fica fora do cartão de autores.
 - **Livro até o fim** significa 90% do livro lido no KOReader. Conta no ano em que chega a essa marca, mesmo para um livro começado anos antes.
+- **Livros marcados como lidos** no KOReader também contam como lidos até o fim quando as estatísticas não os mostram, por exemplo depois de zerar as estatísticas: o livro precisa ter sido marcado como lido no ano, com pelo menos 90% lido, e estar no histórico de leitura do KOReader. Eles entram no cartão de livros, na linha do tempo (no mês em que foram marcados) e no resumo, mas não no tempo, nas páginas nem nos outros cartões, porque as sessões de leitura deles não existem mais.
 - **Páginas** contam o trecho do livro que você cobriu, então reler um trecho com outro tamanho de fonte não soma duas vezes.
 - **Numeração estável:** num livro em que você ligou a numeração estável do KOReader (páginas da editora ou caracteres por página), as páginas contam nela. Os outros livros contam páginas de tela, como o KOReader mostra. Para isso, o livro precisa estar no histórico de leitura do KOReader.
 - **Capas** vêm da biblioteca do KOReader. Livros sem capa no cache ganham uma gerada na hora, com o título e o autor.

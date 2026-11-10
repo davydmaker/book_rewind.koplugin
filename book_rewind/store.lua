@@ -158,6 +158,31 @@ function Store.load_year(path, year, now)
     end)
 end
 
+-- The ids of the books with these partial MD5s, as { [md5] = { id, ... } }. Only hexadecimal MD5s are asked for.
+function Store.book_ids_by_md5(path, md5s)
+    local quoted = {}
+    for _, md5 in ipairs(md5s or {}) do
+        if type(md5) == "string" and md5:match("^%x+$") then
+            quoted[#quoted + 1] = "'" .. md5 .. "'"
+        end
+    end
+    if #quoted == 0 then
+        return {}
+    end
+    return with_connection(path, function(conn)
+        local ids = {}
+        local result = conn:exec("SELECT md5, id FROM book WHERE md5 IN (" .. table.concat(quoted, ",") .. ")")
+        if result then
+            for i = 1, #result[1] do
+                local md5 = result[1][i]
+                ids[md5] = ids[md5] or {}
+                table.insert(ids[md5], number(result[2][i]))
+            end
+        end
+        return ids
+    end) or {}
+end
+
 -- The pages of one book read before the year, in time order, to count how many times it was read to the end.
 function Store.book_history(path, book_id, year)
     return with_connection(path, function(conn)

@@ -39,7 +39,11 @@ function BookRewind:addToMainMenu(menu_items)
             if statistics and statistics.isEnabled and statistics:isEnabled() then
                 pcall(statistics.insertDB, statistics)
             end
-            local ok, screen = pcall(Screen.new, Screen, { doc_settings = self.ui.document and self.ui.doc_settings or nil })
+            local document = self.ui.document
+            local ok, screen = pcall(Screen.new, Screen, {
+                doc_settings = document and self.ui.doc_settings or nil,
+                doc_file = document and document.file or nil,
+            })
             if ok then
                 UIManager:show(screen)
             else

@@ -1,6 +1,5 @@
 -- Page totals in KOReader's stable page numbers (publisher pages or characters per page), for the books where
--- the reader turned them on. KOReader keeps them in each book's settings, not in the statistics, so they are
--- found through the reading history and matched to the statistics by the partial MD5 of the file.
+-- the reader turned them on. The book settings come from BookSettings.collect.
 local StablePages = {}
 
 -- The stable total of a book, from its settings, only when the reader uses stable page numbers in it.
@@ -13,6 +12,18 @@ function StablePages.total(settings)
         return nil
     end
     return pages
+end
+
+-- { [md5] = stable total } for the entries with one.
+function StablePages.totals(entries)
+    local totals = {}
+    for _, entry in ipairs(entries or {}) do
+        local total = entry.md5 and StablePages.total(entry)
+        if total then
+            totals[entry.md5] = total
+        end
+    end
+    return totals
 end
 
 -- books: { [id] = { md5, pages, ... } }, as the store loads them. totals: { [md5] = stable total }.
@@ -29,58 +40,6 @@ function StablePages.apply(books, totals)
         end
     end
     return changed
-end
-
-local function read_keys(doc_settings)
-    return {
-        md5 = doc_settings:readSetting("partial_md5_checksum"),
-        pagemap_use_page_labels = doc_settings:readSetting("pagemap_use_page_labels"),
-        pagemap_doc_pages = doc_settings:readSetting("pagemap_doc_pages"),
-    }
-end
-
--- md5s: { [md5] = true } for the books of the year. since: only history entries opened from then on can
--- hold a book read in the year. opts, for tests: history (a list of { file, time }), open (a function from a
--- file path to its settings) and current (the settings of the book open now, newer than the file on disk).
-function StablePages.collect(md5s, since, opts)
-    opts = opts or {}
-    local totals = {}
-    local wanted = 0
-    for _ in pairs(md5s) do
-        wanted = wanted + 1
-    end
-    local found = 0
-    local function consider(keys)
-        if keys.md5 and md5s[keys.md5] and totals[keys.md5] == nil then
-            totals[keys.md5] = StablePages.total(keys) or false
-            found = found + 1
-        end
-    end
-    if opts.current then
-        local ok, keys = pcall(read_keys, opts.current)
-        if ok then
-            consider(keys)
-        end
-    end
-    local history = opts.history or require("readhistory").hist
-    local open = opts.open or function(file) return require("docsettings"):open(file) end
-    for _, item in ipairs(history or {}) do
-        if found >= wanted then
-            break
-        end
-        if type(item) == "table" and type(item.file) == "string" and (item.time or 0) >= since then
-            local ok, keys = pcall(function() return read_keys(open(item.file)) end)
-            if ok then
-                consider(keys)
-            end
-        end
-    end
-    for md5, total in pairs(totals) do
-        if not total then
-            totals[md5] = nil
-        end
-    end
-    return totals
 end
 
 return StablePages
