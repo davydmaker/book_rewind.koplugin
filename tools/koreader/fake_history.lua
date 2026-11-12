@@ -233,7 +233,9 @@ CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
 PRAGMA user_version = 20201210;
 ]]
 
-function FakeHistory.write_real_covers(path)
+-- opts.file_names: the cache keeps no title, only the file name, as for PDFs and CBZs without metadata.
+function FakeHistory.write_real_covers(path, opts)
+    opts = opts or {}
     local Blitbuffer = require("ffi/blitbuffer")
     local zstd = require("ffi/zstd")
     os.remove(path)
@@ -245,7 +247,11 @@ function FakeHistory.write_real_covers(path)
         local cover = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
         cover:fill(Blitbuffer.COLOR_BLACK)
         local data, compressed = zstd.zstd_compress(cover.data, tonumber(cover.stride) * h)
-        insert:reset():bind("/fake/", index .. ".epub", book[3], book[1], book[2], w, h, cover:getType(), tonumber(cover.stride), SQ3.blob(data, compressed)):step()
+        if opts.file_names then
+            insert:reset():bind("/fake/", book[1] .. ".cbz", book[3], nil, nil, w, h, cover:getType(), tonumber(cover.stride), SQ3.blob(data, compressed)):step()
+        else
+            insert:reset():bind("/fake/", index .. ".epub", book[3], book[1], book[2], w, h, cover:getType(), tonumber(cover.stride), SQ3.blob(data, compressed)):step()
+        end
         cover:free()
     end
     insert:close()

@@ -217,46 +217,65 @@ end
 local Covers = {}
 Covers.__index = Covers
 
--- Covers live in the cache of the Cover browser plugin, found there by title and author.
+-- Covers live in the cache of the Cover browser plugin, found there by title and author. A book without a title in
+-- its metadata (most PDFs and CBZs) has no title in the cache, while the statistics keep its file name without the
+-- extension as the title, so covers are also found by file name.
 -- The cache has no index on titles, so they are read once, and each cover is then read by its rowid.
 -- The connection stays open until close(), so a year with many covers opens the database once.
+local function file_stem(filename)
+    return type(filename) == "string" and (filename:match("^(.+)%.[^.]+$") or filename) or nil
+end
+
 function Store.open_covers(path)
     local conn = open(path)
     if not conn then
         return nil
     end
-    local ok, by_title = pcall(function()
-        local index = {}
-        local result = conn:exec("SELECT rowid, title, authors FROM bookinfo WHERE has_cover = 'Y' AND cover_bb_data IS NOT NULL")
+    local ok, indexes = pcall(function()
+        local by_title, by_file = {}, {}
+        local function add(index, key, entry)
+            index[key] = index[key] or {}
+            table.insert(index[key], entry)
+        end
+        local result = conn:exec("SELECT rowid, title, authors, filename FROM bookinfo WHERE has_cover = 'Y' AND cover_bb_data IS NOT NULL")
         if result then
             for i = 1, #result[1] do
-                local title = result[2][i]
-                if type(title) == "string" then
-                    index[title] = index[title] or {}
-                    table.insert(index[title], { rowid = number(result[1][i]), authors = result[3][i] or "" })
+                local entry = { rowid = number(result[1][i]), authors = result[3][i] or "" }
+                local title, stem = result[2][i], file_stem(result[4][i])
+                if type(title) == "string" and title ~= "" then
+                    add(by_title, title, entry)
+                end
+                if stem then
+                    add(by_file, stem, entry)
                 end
             end
         end
-        return index
+        return { by_title = by_title, by_file = by_file }
     end)
     if not ok then
-        logger.warn("Book Rewind: could not read", path, by_title)
+        logger.warn("Book Rewind: could not read", path, indexes)
         conn:close()
         return nil
     end
-    return setmetatable({ conn = conn, by_title = by_title }, Covers)
+    return setmetatable({ conn = conn, by_title = indexes.by_title, by_file = indexes.by_file }, Covers)
 end
 
--- The book with the same title and author. Without one, the title alone is enough only when a single
--- book in the cache has it: generic titles such as "Poemas" would bring the cover of another book.
-function Covers:find(title, authors)
-    local list = type(title) == "string" and self.by_title[title]
+-- The statistics write "N/A" for a book without authors, and the cache leaves them empty.
+local function same_authors(stored, wanted)
+    local function plain(value)
+        return (type(value) ~= "string" or value == "N/A") and "" or value
+    end
+    return plain(stored) == plain(wanted)
+end
+
+-- The book with the same author. Without one, the name alone is enough only when a single book in the list has
+-- it: generic titles such as "Poemas" would bring the cover of another book.
+local function pick(list, authors)
     if not list then
         return nil
     end
-    local wanted = type(authors) == "string" and authors or ""
     for _, entry in ipairs(list) do
-        if entry.authors == wanted then
+        if same_authors(entry.authors, authors) then
             return entry.rowid
         end
     end
@@ -266,6 +285,14 @@ function Covers:find(title, authors)
         end
     end
     return list[1].rowid
+end
+
+-- By title first, then by file name, for books whose title in the statistics is their file name.
+function Covers:find(title, authors)
+    if type(title) ~= "string" then
+        return nil
+    end
+    return pick(self.by_title[title], authors) or pick(self.by_file[title], authors)
 end
 
 local function read_cover(statement, rowid)

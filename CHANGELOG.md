@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.4.2]
+
+- Covers of PDFs, CBZs and other books without a title in their metadata now show up, found by file name. Before, those books got a generated cover.
+
 ## [1.4.1]
 
 - Books marked as finished in KOReader count as read to the end when the statistics don't show them, for example after a reset: on the books card, the timeline and the summary. They need at least 90% read and to be in KOReader's reading history.

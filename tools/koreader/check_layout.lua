@@ -254,6 +254,8 @@ end
 local FakeHistory = require("fake_history")
 local covers_path = DataStorage:getDataDir() .. "/fake_covers.sqlite3"
 FakeHistory.write_real_covers(covers_path)
+local covers_by_file_path = DataStorage:getDataDir() .. "/fake_covers_by_file.sqlite3"
+FakeHistory.write_real_covers(covers_by_file_path, { file_names = true })
 local fake_db = DataStorage:getDataDir() .. "/fake_stats.sqlite3"
 FakeHistory.write(fake_db, REFERENCE)
 for _, lang in ipairs({ "pt", "en", "es" }) do
@@ -273,6 +275,13 @@ for _, lang in ipairs({ "pt", "en", "es" }) do
     local with_real = open_screen{ db_path = fake_db, covers_db = covers_path, language = lang }
     local real = with_real:load_cover(with_real.metrics.books[1].id, 100, 150, "gray")
     if not real or real:getPixel(50, 75):getColor8().a ~= 0 then problem("the real cover should take priority") end
+    -- PDFs and CBZs often have no title in their metadata: the cache keeps only the file name, which the
+    -- statistics keep as the title.
+    local by_file = open_screen{ db_path = fake_db, covers_db = covers_by_file_path, language = lang }
+    local from_file = by_file:load_cover(by_file.metrics.books[1].id, 100, 150, "gray")
+    if not from_file or from_file:getPixel(50, 75):getColor8().a ~= 0 then problem("the cover of a book without a title was not found by file name") end
+    if from_file then from_file:free() end
+    by_file:onCloseWidget()
     if real then real:free() end
     with_real:onCloseWidget()
     if lang == "pt" then print("with covers: " .. #with_covers.cards .. " cards") end
@@ -452,19 +461,21 @@ with_broken:onCloseWidget()
 local shared_covers = DataStorage:getDataDir() .. "/shared_covers.sqlite3"
 os.remove(shared_covers)
 local shared = SQ3.open(shared_covers)
-shared:exec("CREATE TABLE bookinfo (title TEXT, authors TEXT, has_cover TEXT, cover_w INTEGER, cover_h INTEGER, cover_bb_type INTEGER, cover_bb_stride INTEGER, cover_bb_data BLOB)")
-shared:exec("INSERT INTO bookinfo VALUES ('Poemas', 'Ana Lima', 'Y', 10, 10, 1, 10, X'00')")
-shared:exec("INSERT INTO bookinfo VALUES ('Poemas', 'Bruno Dias', 'Y', 10, 10, 1, 10, X'00')")
+shared:exec("CREATE TABLE bookinfo (filename TEXT NOT NULL, title TEXT, authors TEXT, has_cover TEXT, cover_w INTEGER, cover_h INTEGER, cover_bb_type INTEGER, cover_bb_stride INTEGER, cover_bb_data BLOB)")
+shared:exec("INSERT INTO bookinfo VALUES ('poemas_ana.epub', 'Poemas', 'Ana Lima', 'Y', 10, 10, 1, 10, X'00')")
+shared:exec("INSERT INTO bookinfo VALUES ('poemas_bruno.epub', 'Poemas', 'Bruno Dias', 'Y', 10, 10, 1, 10, X'00')")
 do
     -- Fifty bytes of pixels, which match a stride of 5 for 10 rows but not a width of 10.
     -- As in the Cover browser, SQLite takes over the compressed buffer.
     local zstd, ffi = require("ffi/zstd"), require("ffi")
     local pixels = ffi.new("uint8_t[50]")
     local packed, size = zstd.zstd_compress(pixels, 50)
-    local insert = shared:prepare("INSERT INTO bookinfo VALUES ('Duna', 'Frank Herbert', 'Y', 10, 10, 1, 5, ?)")
+    local insert = shared:prepare("INSERT INTO bookinfo VALUES ('duna.epub', 'Duna', 'Frank Herbert', 'Y', 10, 10, 1, 5, ?)")
     insert:bind(SQ3.blob(packed, size)):step()
     insert:close()
 end
+-- A comic without metadata: no title or authors in the cache, only the file name.
+shared:exec("INSERT INTO bookinfo VALUES ('Trump 003-Milky Way [Eurocomicss] [reducido].cbz', NULL, NULL, 'Y', 10, 10, 1, 10, X'00')")
 shared:close()
 local reader = require("book_rewind/store").open_covers(shared_covers)
 if not reader then
@@ -474,6 +485,8 @@ else
     if reader:find("Poemas", "Carla Souza") then problem("a shared title brought the cover of another book") end
     if reader:find("Duna", "") ~= 3 then problem("a title found only once should find its cover") end
     if reader:load("Duna", "Frank Herbert") then problem("a cover with rows shorter than its width was read") end
+    if reader:find("Trump 003-Milky Way [Eurocomicss] [reducido]", "N/A") ~= 4 then problem("a book without a title should find its cover by file name") end
+    if reader:find("poemas_ana", "Ana Lima") ~= 1 then problem("a title that is a file name should find its cover") end
     reader:close()
 end
 
