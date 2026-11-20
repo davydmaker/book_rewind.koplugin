@@ -1,4 +1,4 @@
-"""Draws the icon, the README banner and the GitHub social preview, or with `screensaver` the full-screen sleep screen cover in assets/ from the rendered cards.
+"""Draws the icon, the README banner and the GitHub social preview, in English and Portuguese (with the `_pt` suffix), or with `screensaver` the full-screen sleep screen cover in assets/ from the rendered cards.
 
 Usage: KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py [screensaver]
 Run tools/koreader/render_readme_screens.lua first. Needs Pillow, and the Noto fonts that ship with KOReader.
@@ -13,8 +13,21 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 BLACK, WHITE = 0, 255
 ICON_SIZE = 1024
 SUPERSAMPLE = 3
-TAGLINE = "Your year of reading, rewound."
-DETAILS = ["A yearly reading recap for KOReader,", "in illustrated cards made for e-ink.", "Offline, on your device."]
+# The words of each language and where its rendered cards are, from tools/koreader/render_readme_screens.lua.
+LANGUAGES = {
+    "en": {
+        "suffix": "",
+        "screenshots": os.path.join("docs", "screenshots"),
+        "tagline": "Your year of reading, rewound.",
+        "details": ["A yearly reading recap for KOReader,", "in illustrated cards made for e-ink.", "Offline, on your device."],
+    },
+    "pt": {
+        "suffix": "_pt",
+        "screenshots": os.path.join("docs", "screenshots", "pt"),
+        "tagline": "O seu ano de leitura, rebobinado.",
+        "details": ["Uma retrospectiva anual de leitura", "para o KOReader, em cartões ilustrados", "feitos para e-ink.", "Sem internet, no seu aparelho."],
+    },
+}
 
 
 def draw_icon():
@@ -55,8 +68,8 @@ def halftone(image, cx, cy, radius, spacing):
         row += 1
 
 
-def place_card(image, name, center, card_height, angle):
-    card = Image.open(os.path.join(ROOT, "docs", "screenshots", name + ".png")).convert("L")
+def place_card(image, name, center, card_height, angle, screenshots=os.path.join("docs", "screenshots")):
+    card = Image.open(os.path.join(ROOT, screenshots, name + ".png")).convert("L")
     card = card.resize((round(card_height * card.width / card.height), card_height), Image.LANCZOS)
     border = max(4, card_height // 90)
     framed = Image.new("LA", (card.width + 2 * border, card.height + 2 * border), (WHITE, 255))
@@ -65,22 +78,23 @@ def place_card(image, name, center, card_height, angle):
     image.paste(rotated.getchannel("L"), (center[0] - rotated.width // 2, center[1] - rotated.height // 2), rotated.getchannel("A"))
 
 
-def draw_header(width, height, fonts, icon, layout):
+def draw_header(width, height, fonts, icon, layout, language):
     k = 2
     image = Image.new("L", (width * k, height * k), BLACK)
     middle, card_height, offset, text = layout["middle"], layout["card_height"], layout["offset"], layout["text"]
     halftone(image, middle * k, height // 2 * k, round(layout["halftone"] * k), 26 * k)
     drop = round(card_height * 0.05)
-    place_card(image, "hours", ((middle - offset) * k, (height // 2 + drop) * k), card_height * k, 8)
-    place_card(image, "profiles/marathoner", ((middle + offset) * k, (height // 2 + drop) * k), card_height * k, -8)
-    place_card(image, "cover", (middle * k, height // 2 * k), card_height * k, 0)
+    screenshots = language["screenshots"]
+    place_card(image, "hours", ((middle - offset) * k, (height // 2 + drop) * k), card_height * k, 8, screenshots)
+    place_card(image, "profiles/marathoner", ((middle + offset) * k, (height // 2 + drop) * k), card_height * k, -8, screenshots)
+    place_card(image, "cover", (middle * k, height // 2 * k), card_height * k, 0, screenshots)
 
     margin = 58
     icon_size = round(96 * text)
     title_size = round(72 * text)
     tagline_size = round(27 * text)
     details_size = round(19 * text)
-    details = layout.get("details")
+    details = language["details"] if layout.get("details") else None
     block = icon_size + title_size + tagline_size + round(44 * text)
     if details:
         block += round(details_size * 1.45 * len(details)) + round(22 * text)
@@ -93,7 +107,7 @@ def draw_header(width, height, fonts, icon, layout):
     d = ImageDraw.Draw(image)
     d.text((margin * k, y * k), "Book Rewind", font=ImageFont.truetype(fonts["bold"], title_size * k), fill=WHITE)
     y += title_size + round(26 * text)
-    d.text((margin * k, y * k), TAGLINE, font=ImageFont.truetype(fonts["italic"], tagline_size * k), fill=WHITE)
+    d.text((margin * k, y * k), language["tagline"], font=ImageFont.truetype(fonts["italic"], tagline_size * k), fill=WHITE)
     y += tagline_size + round(30 * text)
     if details:
         font = ImageFont.truetype(fonts["regular"], details_size * k)
@@ -140,9 +154,13 @@ def main():
         print("Image generated in assets/screensaver.png")
         return
     icon.save(os.path.join(brand, "icon.png"), optimize=True)
-    draw_header(1280, 400, fonts, icon, {"middle": 945, "card_height": 330, "offset": 170, "text": 1, "halftone": 296}).save(os.path.join(brand, "banner.png"), optimize=True)
-    draw_header(1280, 640, fonts, icon, {"middle": 950, "card_height": 440, "offset": 118, "text": 1.2, "halftone": 380, "details": DETAILS}).save(os.path.join(ROOT, "docs", "social-preview.png"), optimize=True)
-    print("Images generated in docs/brand and docs/social-preview.png")
+    for language in LANGUAGES.values():
+        suffix = language["suffix"]
+        draw_header(1280, 400, fonts, icon, {"middle": 945, "card_height": 330, "offset": 170, "text": 1, "halftone": 296}, language).save(
+            os.path.join(brand, "banner" + suffix + ".png"), optimize=True)
+        draw_header(1280, 640, fonts, icon, {"middle": 950, "card_height": 440, "offset": 118, "text": 1.2, "halftone": 380, "details": True}, language).save(
+            os.path.join(ROOT, "docs", "social-preview" + suffix + ".png"), optimize=True)
+    print("Images generated in docs/brand and docs/social-preview.png, in English and with _pt in Portuguese")
 
 
 main()

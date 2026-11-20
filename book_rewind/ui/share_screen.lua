@@ -1,4 +1,3 @@
-local bit = require("bit")
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -19,13 +18,17 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local ffi = require("ffi")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local socket = require("socket")
 local util = require("util")
 
 local Access = require("book_rewind/share/access")
+local Awake = require("book_rewind/awake")
 local CardView = require("book_rewind/ui/card_view")
 local Deck = require("book_rewind/share/deck")
-local Server = require("book_rewind/share/server")
+local Lan = require("book_rewind/lan")
+local Portrait = require("book_rewind/portrait")
+local Refresh = require("book_rewind/refresh")
+local Server = require("book_rewind/http_server")
+local Sleep = require("book_rewind/sleep")
 local Strings = require("book_rewind/share/strings")
 
 local Device_screen = Device.screen
@@ -34,9 +37,6 @@ local PORT = 8643
 local TICK_ACTIVE = 0.02
 local TICK_IDLE = 0.25
 local IDLE_LIMIT = 600
-local PARTIAL_REFRESHES = 8
-local TOKEN_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
-local TOKEN_LENGTH = 16
 local SERIF = "noto/NotoSerif-Regular.ttf"
 local SERIF_BOLD = "noto/NotoSerif-Bold.ttf"
 -- The design is 600x800; a story of 1080x1920 keeps it whole in the middle, with room above and below.
@@ -61,44 +61,6 @@ local ShareScreen = InputContainer:extend{
     close_firewall = nil,
 }
 
-local function random_token()
-    local source = io.open("/dev/urandom", "rb")
-    if not source then
-        return nil
-    end
-    local bytes = source:read(TOKEN_LENGTH)
-    source:close()
-    if not bytes or #bytes < TOKEN_LENGTH then
-        return nil
-    end
-    local out = {}
-    for i = 1, TOKEN_LENGTH do
-        local index = bytes:byte(i) % #TOKEN_ALPHABET + 1
-        out[i] = TOKEN_ALPHABET:sub(index, index)
-    end
-    return table.concat(out)
-end
-
--- Connecting a UDP socket picks the outgoing interface without sending any packet.
-local function detect_local_ip()
-    local udp = socket.udp()
-    if not udp then
-        return nil
-    end
-    udp:setpeername("10.255.255.255", 9)
-    local ip = udp:getsockname()
-    udp:close()
-    return ip
-end
-
-local function firewall(action)
-    if not Device:isKindle() then
-        return
-    end
-    os.execute(string.format("iptables -%s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT 2>/dev/null", action, PORT))
-    os.execute(string.format("iptables -%s OUTPUT -p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT 2>/dev/null", action, PORT))
-end
-
 local function read_file(path)
     local file = io.open(path, "rb")
     if not file then
@@ -113,7 +75,9 @@ function ShareScreen.cache_dir()
     return DataStorage:getDataDir() .. "/cache/book_rewind_share"
 end
 
-function ShareScreen.marker_path()
+-- Versions before 1.4.3 kept their own marker while sharing, for the firewall and powerd's preventScreenSaver.
+-- The firewall and the awake mode now have markers of their own, in lan.lua and awake.lua.
+local function legacy_marker_path()
     return DataStorage:getDataDir() .. "/cache/book_rewind_share.active"
 end
 
@@ -129,25 +93,40 @@ local function remove_cache()
     end
 end
 
--- A crash or a forced quit skips onCloseWidget, which would leave the port open and the Kindle awake.
+-- A crash or a forced quit skips onCloseWidget. lan.lua and awake.lua undo their part when main.lua loads; this
+-- removes the images left in the cache, and what a version before 1.4.3 may have left on the system.
 function ShareScreen.recover()
-    if lfs.attributes(ShareScreen.marker_path(), "mode") ~= "file" then
+    remove_cache()
+    if lfs.attributes(legacy_marker_path(), "mode") ~= "file" then
         return
     end
-    firewall("D")
-    if Device:isKindle() and not PluginShare.keepalive then
-        os.execute("lipc-set-prop com.lab126.powerd preventScreenSaver 0")
+    if Device:isKindle() then
+        os.execute(string.format("iptables -D INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT 2>/dev/null", PORT))
+        os.execute(string.format("iptables -D OUTPUT -p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT 2>/dev/null", PORT))
+        if not PluginShare.keepalive then
+            os.execute("lipc-set-prop com.lab126.powerd preventScreenSaver 0")
+        end
     end
-    remove_cache()
-    os.remove(ShareScreen.marker_path())
+    os.remove(legacy_marker_path())
 end
 
 function ShareScreen:init()
-    local rotation = Device_screen:getRotationMode()
-    if bit.band(rotation, 1) == 1 then
-        self.restore_rotation = rotation
-        Device_screen:setRotationMode(Device_screen.DEVICE_ROTATED_UPRIGHT)
+    -- Portrait gives the rotation back when setup fails; a session started before the failure is stopped.
+    local ok, err = pcall(Portrait.open, self, self.setup)
+    if not ok then
+        pcall(self.stop_sharing, self)
+        error(err, 0)
     end
+end
+
+function ShareScreen:setup()
+    Sleep.watch(self)
+    if Device:hasKeys() then
+        self.key_events = self.key_events or {}
+        self.key_events.Back = { { Device.input.group.Back } }
+    end
+    -- The screen is rebuilt on each change: a few updates without a flash, then a flash.
+    self.refresh = Refresh.new(8)
     self.dimen = Geom:new{ x = 0, y = 0, w = Device_screen:getWidth(), h = Device_screen:getHeight() }
     self.width, self.height = self.dimen.w, self.dimen.h
     self.text_width = self.width - 2 * Device_screen:scaleBySize(30)
@@ -206,29 +185,13 @@ function ShareScreen:layer(theme, index, size)
     return { path = path }
 end
 
-function ShareScreen:keep_awake(on)
-    if (self.awake or false) == on then
-        return
-    end
-    self.awake = on
-    if on then
-        self.previous_pause = PluginShare.pause_auto_suspend
-        PluginShare.pause_auto_suspend = true
-    else
-        PluginShare.pause_auto_suspend = self.previous_pause
-    end
-    if Device:isKindle() and not PluginShare.keepalive then
-        os.execute(string.format("lipc-set-prop com.lab126.powerd preventScreenSaver %d", on and 1 or 0))
-    end
-end
-
 function ShareScreen:start_sharing()
-    local ip = self.local_ip or detect_local_ip()
-    if not ip or not Access.is_private_ip(ip) then
+    local ip = self.local_ip or Lan.local_ip()
+    if not ip or not Lan.is_private_ip(ip) then
         self:show_message(self.strings.no_network_title, self.strings.no_network_text)
         return
     end
-    local token = random_token()
+    local token = Lan.random_token()
     if not token then
         self:show_message(self.strings.start_failed_title, self.strings.token_failed)
         return
@@ -251,26 +214,31 @@ function ShareScreen:start_sharing()
         on_new_client = function(client_ip) self:ask_permission(client_ip) end,
     }
     remove_cache()
-    self.server = Server.new{ access = self.access, ip = ip, port = self.port }
-    local close_firewall = self.close_firewall or function() firewall("D") end
-    local open_firewall = self.open_firewall or function() firewall("A") end
-    close_firewall()
-    local ok, err = self.server:start()
+    local server = Server.new{ access = self.access, ip = ip, port = self.port, name = "Book Rewind" }
+    local ok, err = server:start()
     if not ok then
-        self.server = nil
         self:show_message(self.strings.start_failed_title, tostring(err))
         return
     end
-    local marker = io.open(ShareScreen.marker_path(), "w")
-    if marker then
-        marker:close()
+    -- Only once the server is up, so a failed bind never leaves the port open.
+    local port = self.port
+    local open_firewall = self.open_firewall or Lan.open_firewall
+    local close_firewall = self.close_firewall or Lan.close_firewall
+    if open_firewall(port) == false then
+        server:stop()
+        self:show_message(self.strings.start_failed_title, self.strings.firewall_failed)
+        return
     end
-    open_firewall()
-    self.close_firewall_now = close_firewall
+    self.server = server
+    self.close_firewall_now = function()
+        if close_firewall(port) == false then
+            logger.warn("Book Rewind: the port could not be closed; it is closed again when KOReader starts")
+        end
+    end
     self.state = "waiting"
-    self:keep_awake(true)
+    Awake.set(true, self)
     self:show_sharing()
-    UIManager:scheduleIn(TICK_IDLE, self.tick_callback)
+    Sleep.schedule(self, TICK_IDLE, self.tick_callback)
 end
 
 -- The answer only counts while this session is running: the question may outlive it by sleep or the idle limit.
@@ -299,7 +267,7 @@ function ShareScreen:ask_permission(client_ip)
             access:deny(client_ip)
         end,
     }
-    UIManager:show(self.confirm)
+    Sleep.show(self, self.confirm)
 end
 
 function ShareScreen:close_confirm()
@@ -318,11 +286,11 @@ function ShareScreen:tick()
         self:stop_sharing(self.strings.idle_stop)
         return
     end
-    UIManager:scheduleIn(busy and TICK_ACTIVE or TICK_IDLE, self.tick_callback)
+    Sleep.schedule(self, busy and TICK_ACTIVE or TICK_IDLE, self.tick_callback)
 end
 
 function ShareScreen:stop_sharing(message)
-    UIManager:unschedule(self.tick_callback)
+    Sleep.unschedule(self, self.tick_callback)
     self:close_confirm()
     if self.server then
         self.server:stop()
@@ -332,9 +300,8 @@ function ShareScreen:stop_sharing(message)
         self.close_firewall_now()
         self.close_firewall_now = nil
     end
-    self:keep_awake(false)
+    Awake.set(false, self)
     remove_cache()
-    os.remove(ShareScreen.marker_path())
     if message then
         self:show_message(self.strings.ended_title, message)
     end
@@ -370,16 +337,9 @@ function ShareScreen:set_group(kind, group)
         height = self.height,
         CenterContainer:new{ dimen = Geom:new{ w = self.width, h = self.height }, group },
     }
-    local mode = "full"
-    if kind == self.shown_kind and (self.partial_refreshes or 0) < PARTIAL_REFRESHES then
-        mode = "ui"
-        self.partial_refreshes = (self.partial_refreshes or 0) + 1
-    else
-        self.partial_refreshes = 0
-    end
-    self.shown_kind = kind
-    UIManager:setDirty(self, function()
-        return mode, self.dimen
+    -- While the device sleeps, the screen is painted when it wakes up.
+    Sleep.dirty(self, function()
+        return self.refresh:mode(kind), self.dimen
     end)
 end
 
@@ -452,15 +412,24 @@ function ShareScreen:onSuspend()
     self:stop_sharing(self.strings.slept)
 end
 
-function ShareScreen:onSetRotationMode()
+-- The back key stops sharing and goes back to the cards.
+function ShareScreen:onBack()
+    UIManager:close(self)
     return true
 end
 
+-- KOReader sends Close to every window before it quits, and with keep_screensaver before it powers off.
+function ShareScreen:onClose(arg)
+    if not (arg and arg.keep_screensaver) then
+        UIManager:close(self)
+    end
+end
+
+ShareScreen.onSetRotationMode = Portrait.ignore_rotation
+
 function ShareScreen:onCloseWidget()
     self:stop_sharing()
-    if self.restore_rotation then
-        Device_screen:setRotationMode(self.restore_rotation)
-    end
+    Portrait.close(self)
     UIManager:setDirty(nil, "full")
 end
 

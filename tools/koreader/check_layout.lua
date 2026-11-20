@@ -515,7 +515,8 @@ keys:onNextCard()
 if keys.index ~= 2 then problem("the next key did not work") end
 keys:onPreviousCard()
 if keys.index ~= 1 then problem("the previous key did not work") end
-if Device:hasKeys() and not (keys.key_events and keys.key_events.Close) then problem("the close key is missing") end
+if Device:hasKeys() and not (keys.key_events and keys.key_events.Back) then problem("the back key is missing") end
+if keys.key_events and keys.key_events.Close then problem("the back key should not be the Close event KOReader sends to every window") end
 keys:onCloseWidget()
 
 -- Real files carry very long titles and authors, and every card and cover has to hold them.
@@ -602,16 +603,10 @@ for _, id in ipairs({ "night_owl", "early_bird", "steady", "marathoner", "loyal"
 end
 all_years:onCloseWidget()
 
+-- A screen that fails to open puts the rotation back. tools/koreader/check_rotation.lua checks the rest of the
+-- rotation, but cannot make this screen fail with an empty plugin folder.
 local initial = Screen:getRotationMode()
-Screen:setRotationMode(Screen.DEVICE_ROTATED_CLOCKWISE)
 SampleDb.write(db, year, {})
-local rotated = open_screen{ db_path = db }
-if Screen:getWidth() > Screen:getHeight() then problem("did not return to portrait") end
-rotated:onCloseWidget()
-if Screen:getRotationMode() ~= Screen.DEVICE_ROTATED_CLOCKWISE then problem("rotation was not restored") end
-Screen:setRotationMode(initial)
-
--- A screen that fails to open puts the rotation back.
 Screen:setRotationMode(Screen.DEVICE_ROTATED_CLOCKWISE)
 if pcall(open_screen, { db_path = db, language = "xx" }) then problem("a screen without texts should not open") end
 if Screen:getRotationMode() ~= Screen.DEVICE_ROTATED_CLOCKWISE then problem("a failed opening did not restore the rotation") end

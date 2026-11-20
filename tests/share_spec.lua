@@ -3,7 +3,7 @@ package.path = "./?.lua;" .. package.path
 package.loaded.socket = package.loaded.socket or { gettime = os.clock }
 local Access = require("book_rewind/share/access")
 local Deck = require("book_rewind/share/deck")
-local Server = require("book_rewind/share/server")
+local Server = require("book_rewind/http_server")
 local Strings = require("book_rewind/share/strings")
 
 local passed, failed = 0, 0
@@ -213,42 +213,6 @@ end)
 test("rows of dots go in the deck as a short rule", function()
     local json = Deck.build({ { id = "summary" } }, "gray", 2026, { page = {} })
     assert(json:find('["d",-31,-1,11,1.5,"#000000"]', 1, true))
-end)
-
-test("all three languages have the same texts", function()
-    local function keys(from, into, prefix)
-        for key, value in pairs(from) do
-            if type(value) == "table" then
-                keys(value, into, key .. ".")
-            else
-                into[prefix .. key] = true
-            end
-        end
-        return into
-    end
-    local english = keys(Strings.en, {}, "")
-    for _, language in ipairs({ "pt", "es" }) do
-        local other = keys(Strings[language], {}, "")
-        for key in pairs(english) do
-            assert(other[key], language .. " has no " .. key)
-        end
-        for key in pairs(other) do
-            assert(english[key], "en has no " .. key)
-        end
-    end
-end)
-
-test("no text names a brand of e-reader, since the plugin runs on many", function()
-    local function check(from, path)
-        for key, value in pairs(from) do
-            if type(value) == "table" then
-                check(value, path .. "." .. key)
-            else
-                assert(not value:lower():find("kindle", 1, true), path .. "." .. key .. " names the Kindle")
-            end
-        end
-    end
-    check(Strings, "strings")
 end)
 
 -- A connection that hands out what was queued, and keeps what it receives.

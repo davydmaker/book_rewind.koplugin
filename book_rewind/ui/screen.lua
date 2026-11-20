@@ -1,4 +1,3 @@
-local bit = require("bit")
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -25,6 +24,8 @@ local BookSettings = require("book_rewind/book_settings")
 local Marked = require("book_rewind/marked")
 local StablePages = require("book_rewind/stable_pages")
 local I18n = require("book_rewind/i18n")
+local Portrait = require("book_rewind/portrait")
+local Refresh = require("book_rewind/refresh")
 local Stats = require("book_rewind/stats")
 local Store = require("book_rewind/store")
 local Themes = require("book_rewind/ui/themes")
@@ -52,20 +53,10 @@ local Screen = InputContainer:extend{
 }
 
 function Screen:init()
-    -- The layout only fits portrait; odd rotation modes are landscape.
-    local rotation = Device_screen:getRotationMode()
-    if bit.band(rotation, 1) == 1 then
-        self.restore_rotation = rotation
-        Device_screen:setRotationMode(Device_screen.DEVICE_ROTATED_UPRIGHT)
-    end
-    -- A failure past this point must not leave the screen rotated.
-    local ok, err = pcall(self.setup, self)
+    -- The layout only fits portrait. Portrait gives the rotation back when setup fails.
+    local ok, err = pcall(Portrait.open, self, self.setup)
     if not ok then
         self:free_covers()
-        if self.restore_rotation then
-            Device_screen:setRotationMode(self.restore_rotation)
-            self.restore_rotation = nil
-        end
         error(err, 0)
     end
 end
@@ -85,11 +76,11 @@ function Screen:setup()
         Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } },
     }
     if Device:hasKeys() then
-        self.key_events = {
-            Close = { { Device.input.group.Back } },
-            NextCard = { { Device.input.group.PgFwd } },
-            PreviousCard = { { Device.input.group.PgBack } },
-        }
+        -- Added to the table InputContainer made, which may already hold KOReader's own keys.
+        self.key_events = self.key_events or {}
+        self.key_events.Back = { { Device.input.group.Back } }
+        self.key_events.NextCard = { { Device.input.group.PgFwd } }
+        self.key_events.PreviousCard = { { Device.input.group.PgBack } }
     end
     self.close_rect = CardView.close_rect(self.width, self.height)
     local meta_chunk = loadfile(PLUGIN_DIR .. "/_meta.lua")
@@ -316,7 +307,7 @@ function Screen:show_empty(year, seconds)
         CenterContainer:new{ dimen = Geom:new{ w = self.width, h = self.height }, group },
     }
     UIManager:setDirty(self, function()
-        return "full", self.dimen
+        return Refresh.settle("full"), self.dimen
     end)
 end
 
@@ -339,8 +330,9 @@ end
 function Screen:show_card(index)
     self.index = index
     self:clear_panel()
+    -- Every card is a new layout, so every change flashes.
     UIManager:setDirty(self, function()
-        return "full", self.dimen
+        return Refresh.settle("full"), self.dimen
     end)
 end
 
@@ -409,7 +401,7 @@ function Screen:toggle_double_flash(rect)
     G_reader_settings:saveSetting(DOUBLE_FLASH_SETTING, self.double_flash)
     local region = Geom:new(rect)
     UIManager:setDirty(self, function()
-        return "ui", region
+        return Refresh.settle("ui"), region
     end)
 end
 
@@ -474,20 +466,25 @@ function Screen:onPreviousCard()
     return true
 end
 
-function Screen:onClose()
+-- The back key closes Book Rewind: the cards and the notice of an empty year are its only screens.
+function Screen:onBack()
     UIManager:close(self)
     return true
 end
 
-function Screen:onSetRotationMode()
-    return true
+-- KOReader sends Close to every window before it quits (USB mode on a Kobo, closing the window on a computer),
+-- and with keep_screensaver before it powers off, when the window stays for the sleep screen.
+function Screen:onClose(arg)
+    if not (arg and arg.keep_screensaver) then
+        UIManager:close(self)
+    end
 end
+
+Screen.onSetRotationMode = Portrait.ignore_rotation
 
 function Screen:onCloseWidget()
     self:free_covers()
-    if self.restore_rotation then
-        Device_screen:setRotationMode(self.restore_rotation)
-    end
+    Portrait.close(self)
     UIManager:setDirty(nil, "full")
 end
 

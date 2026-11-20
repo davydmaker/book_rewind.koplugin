@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.3]
+
+- While sharing, the power button puts the e-reader to sleep again, which ends the session. The e-reader still stays awake on its own while the screen is open.
+- The network port opened for sharing only accepts connections from private networks, and a port that cannot be opened stops sharing with a message.
+- When the e-reader sleeps while sharing, the message about it shows up after waking, instead of being drawn over the sleep screen.
+- On devices with keys, the back key goes back from the share screen to the cards, and both screens close properly when KOReader quits.
+- Titles in capital letters on the cards keep accented letters such as ä, è, ö and ø.
+
 ## [1.4.2]
 
 - Covers of PDFs, CBZs and other books without a title in their metadata now show up, found by file name. Before, those books got a generated cover.

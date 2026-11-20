@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/banner.png" alt="Book Rewind: o seu ano de leitura, rebobinado">
+  <img src="docs/brand/banner_pt.png" alt="Book Rewind: o seu ano de leitura, rebobinado">
 </p>
 
 <p align="center">

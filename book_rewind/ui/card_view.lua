@@ -9,6 +9,7 @@ local TextWidget = require("ui/widget/textwidget")
 local ffi = require("ffi")
 
 local Cards = require("book_rewind/cards")
+local Letters = require("book_rewind/letters")
 local Themes = require("book_rewind/ui/themes")
 
 local Screen = Device.screen
@@ -25,14 +26,7 @@ local theme = Themes.gray
 local rgb_mode = false
 local BASE_W, BASE_H = 600, 800
 
-local UPPER = {
-    ["á"] = "Á", ["à"] = "À", ["â"] = "Â", ["ã"] = "Ã", ["é"] = "É", ["ê"] = "Ê", ["í"] = "Í",
-    ["ó"] = "Ó", ["ô"] = "Ô", ["õ"] = "Õ", ["ú"] = "Ú", ["ü"] = "Ü", ["ç"] = "Ç", ["ñ"] = "Ñ",
-}
-
-local function upper(text)
-    return (text:upper():gsub("[\194-\244][\128-\191]*", function(char) return UPPER[char] or char end))
-end
+local upper = Letters.upper
 
 local clip = Cards.clip
 

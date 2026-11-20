@@ -8,6 +8,9 @@ local PluginScreensaver = require("book_rewind/screensaver")
 local Screen = require("book_rewind/ui/screen")
 local ShareScreen = require("book_rewind/ui/share_screen")
 
+-- When the file loads, so a crash while sharing is undone as soon as KOReader starts: the port and the awake mode.
+require("book_rewind/lan").install("book_rewind")
+require("book_rewind/awake").install("book_rewind")
 PluginScreensaver.install(debug.getinfo(1, "S").source:gsub("^@", ""):match("(.*)/") or ".", "book_rewind")
 
 local function strings()

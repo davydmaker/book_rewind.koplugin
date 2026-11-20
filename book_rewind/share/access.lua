@@ -14,14 +14,8 @@ local function escape_html(text)
     }))
 end
 
-function Access.is_private_ip(ip)
-    local a, b = tostring(ip):match("^(%d+)%.(%d+)%.%d+%.%d+$")
-    a, b = tonumber(a), tonumber(b)
-    if not a then
-        return false
-    end
-    return a == 10 or (a == 172 and b >= 16 and b <= 31) or (a == 192 and b == 168)
-end
+-- The same rule as the session: 10.x, 172.16-31.x and 192.168.x.
+Access.is_private_ip = require("book_rewind/lan").is_private_ip
 
 -- opts: token, host (the "ip:port" this server answers to), strings, deck(theme) returning JSON text,
 -- layer(theme, index, size) returning { path } or nil, or nil and "space", assets { script, style },

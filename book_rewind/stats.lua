@@ -1,3 +1,5 @@
+local Letters = require("book_rewind/letters")
+
 local Stats = {}
 
 local SESSION_GAP = 300
@@ -13,15 +15,6 @@ local SEGMENT_GAP_DAYS = 14
 local NIGHT_HOURS = { [22] = true, [23] = true, [0] = true, [1] = true, [2] = true, [3] = true, [4] = true }
 local MORNING_HOURS = { [5] = true, [6] = true, [7] = true, [8] = true }
 local NIGHT_CHANCE, MORNING_CHANCE, WEEKEND_CHANCE = 7 / 24, 4 / 24, 2 / 7
-
-local ACCENTS = {}
-for plain, chars in pairs({
-    a = "áàâãäÁÀÂÃÄ", c = "çÇ", e = "éèêëÉÈÊË", i = "íìîïÍÌÎÏ", n = "ñÑ", o = "óòôõöÓÒÔÕÖ", u = "úùûüÚÙÛÜ",
-}) do
-    for char in chars:gmatch("\195[\128-\191]") do
-        ACCENTS[char] = plain
-    end
-end
 
 local TITLE_PLACEHOLDERS = { ["n/a"] = true, ["unknown"] = true, ["desconhecido"] = true, ["desconocido"] = true }
 -- What documents carry when nobody filled in the author: the account that made the file, or a generic label.
@@ -43,8 +36,9 @@ local DOMAIN_ENDINGS = { com = true, net = true, org = true, br = true, xyz = tr
 local SITE_MARKS = { "livros", "ebook", "e%-book", "epub", "%.com", "%.net", "%.org", "%.xyz", "%.website", "%.site" }
 local FILE_EXTENSIONS = { pdf = true, doc = true, docx = true, indd = true, qxd = true, qxp = true, pmd = true, rtf = true, txt = true, epub = true, mobi = true, p65 = true, cdr = true }
 
+-- Without accents and in lower case, to compare names written in different ways.
 function Stats.fold(text)
-    return (text:gsub("\195[\128-\191]", ACCENTS):lower())
+    return Letters.lower(Letters.plain(text))
 end
 local fold = Stats.fold
 

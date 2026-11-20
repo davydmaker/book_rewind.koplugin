@@ -6,7 +6,7 @@ A year of reading as a set of cards, in the style of a yearly recap, generated o
 
 - In English, Portuguese and Spanish, following KOReader's language. In any other language, it uses English.
 - It lives in the Tools menu, as **Book Rewind**. It opens on the most recent year with at least 10 minutes of reading, and the cover offers the neighbouring years that also reach that minimum. In the first 30 days of a year, it opens on the year that just ended, if that year reaches the minimum, and the new year stays on the button.
-- A tap on the right or a swipe moves forward. A tap on the left third moves back. On devices with keys, the page keys navigate and the back key closes; changing the year and sharing need touch.
+- A tap on the right or a swipe moves forward. A tap on the left third moves back. On devices with keys, the page keys navigate and the back key closes the cards, or goes back to them from the share screen; changing the year and sharing need touch. The back key has an event of its own (`Back`), because KOReader sends `Close` to every window before it quits, and both windows only close on it.
 - It reads `koreader/settings/statistics.sqlite3` read-only. With a book open, it first writes the pages the statistics plugin still keeps in memory.
 - For page counts, it also reads, read-only, the settings KOReader keeps for each book opened in the year (see Stable page numbers in Metrics).
 - **Share**, on the summary card, opens a screen with a QR code. See [Sharing](#sharing). Nothing is written to KOReader's screenshots folder, and images saved there by older versions stay untouched.
@@ -55,14 +55,14 @@ The print language of halftone, hatching and speed lines, in three themes that s
 - **Data charts** (shelf, year map, clock, standing books, mountain, gauge and piles) are drawn in `ui/card_view.lua`, in 600x800 coordinates fitted to the screen.
 - **Color** goes through roles (`BLACK`, `WHITE`, `TEXT`, `BACKGROUND` and others), tables that the drawing code and the wildcards keep and that each card fills from its theme. `TextWidget` only draws in gray, so color text goes through a mask. A text box always goes through a mask, because it would paint its background over the drawing behind it.
 - **Refresh:** every card redraws the whole panel with a flash. One flash can still leave the edges of the previous card, as seen on a basic Kindle, so the cover has a checkbox, only on e-ink screens, that clears the panel to white with one more flash before each card. It starts off, because a card change takes about twice as long, and it stays in KOReader's settings as `book_rewind_double_flash`. In the `eink` theme, the screen is marked as dithered, which is what makes KOReader use the color waveforms of the panel.
-- **Brand:** the icon is a ribbon bookmark with a rewind mark. `docs/brand/` has the icon and the README banner, and `docs/social-preview.png` is the image for the GitHub repository settings.
+- **Brand:** the icon is a ribbon bookmark with a rewind mark. `docs/brand/` has the icon and the README banners, `banner.png` in English and `banner_pt.png` for `README_pt.md`. `docs/social-preview.png` is the image for the GitHub repository settings, and `docs/social-preview_pt.png` is the same in Portuguese, for posts in Portuguese, since GitHub takes a single one.
 - **Sleep screen:** if the device sleeps with the cards or the share screen open and the KOReader sleep screen is set to the book cover, `assets/screensaver.png` shows instead. `book_rewind/screensaver.lua` wraps KOReader's `Screensaver.setup`: KOReader picks the image as usual, and the plugin swaps it only when one of its screens is the topmost full-screen window. Nothing is saved, so closing the plugin brings back the book cover. Powering off, restarting or any other sleep screen mode are left alone. The image is 1200x1600, twice 600x800, so it stays sharp on larger screens; on 600x800 KOReader halves it.
 
 ## Sharing
 
 The device only draws each card without its background and sends the data of the background, and the browser puts them together. So the animation and the image of 1080x1920 cost the device nothing, and the same drawings serve both.
 
-1. The screen in `ui/share_screen.lua` starts a server on port 8643, in `share/server.lua`, and shows the QR code.
+1. The screen in `ui/share_screen.lua` starts a server on port 8643, in `http_server.lua`, and shows the QR code. The session (the code in the address, the Wi-Fi address, the private network and the firewall) comes from `lan.lua`, and the awake mode from `awake.lua`, both from the `lan_server` and `awake` patterns of the kindle project.
 2. The first device with the address waits for approval, on the screen.
 3. The page, in `assets/share/`, asks for `deck/<theme>`, the JSON of the backgrounds from `share/deck.lua`, and `layer/<theme>/<card>/preview`, a PNG of 600x800 with transparency.
 4. To save, it asks for `layer/<theme>/<card>/story`, of 1080x1440, and draws the background and the layer on a canvas of 1080x1920.
@@ -75,8 +75,9 @@ The rules follow Book Drop, without anything that receives files. None of these 
 | Layer | What it does |
 |---|---|
 | Only on while in use | The server exists while the screen is open. It closes on Stop, on sleep and after 10 minutes without use. Only the approved device counts as use. |
+| Awake, with the power button | While the session runs, KOReader's auto suspend is paused and, on a Kindle, the idle timer of the system is reset every few minutes, as a touch would. powerd's `preventScreenSaver` is not used, so the power button still puts the device to sleep, which ends the session. |
 | One network | It listens only on the Wi-Fi address, not on USB networking. |
-| Firewall | The port opens in `iptables` during the session, and the rule goes away on closing. |
+| Firewall | The port opens in `iptables` during the session, only for connections from private networks, and the rules go away on closing. The port opens only after the server is listening, and a port that cannot be opened stops the session with a message. |
 | Secret code | The address carries a random code from `/dev/urandom`, new at each opening. Without it, every answer is the same 404. |
 | Approval on the device | The first device with the code must be approved on the screen. Until then, it only gets the waiting page and its style. |
 | One device | Once approved, no other address is served. |
@@ -89,7 +90,8 @@ The rules follow Book Drop, without anything that receives files. None of these 
 | Pages | A restrictive `Content-Security-Policy`, `nosniff`, no frames and no inline script. Texts in the JSON are escaped. |
 | Space | Refuses to draw when less than 50 MB would stay free, since the cache shares its partition with KOReader's settings. |
 | Errors stay contained | An error in a request ends that connection only. The error goes to the KOReader log, without the request, which carries the code. |
-| After a crash | A marker file records that sharing started. If KOReader crashes with the screen open, the next start closes the port, lets the device sleep again and removes the images. |
+| After a crash | `lan.lua` lists the open port in a marker, and `awake.lua` keeps its own. If KOReader crashes with the screen open, the next start closes the port, lets the device sleep again and removes the images. The marker of versions before 1.4.3 is still undone. |
+| Asleep | Sleep ends the session, and the message about it is painted when the device wakes up, not over the sleep screen (`sleep.lua`, from the `sleep` pattern). A device that asks for approval while the screen sleeps gets the question on waking. |
 
 The page takes the whole screen of the phone: the card on top, with the progress over it, and two lines below: the style, then the buttons to save the image or all of them. The background always moves, and the saved image has it still, without the progress.
 
@@ -154,7 +156,6 @@ book_rewind.koplugin/
     stable_pages.lua      page totals in stable page numbers
     store.lua             database access
     share/access.lua      who gets what when sharing, independent from KOReader and the network
-    share/server.lua      HTTP server that does not block the interface
     share/deck.lua        backgrounds as JSON, for the browser
     share/strings.lua     texts of the share screen and page, in the three languages
     ui/screen.lua         navigation
@@ -165,6 +166,13 @@ book_rewind.koplugin/
     ui/scenes.lua         backgrounds of the cards
     ui/generated_cover.lua cover for books with none in the cache
     screensaver.lua       the plugin cover on the sleep screen
+    portrait.lua          full-screen windows in portrait, also when opening fails
+    refresh.lua           when a screen update flashes
+    letters.lua           accented letters: case and comparisons
+    lan.lua               the sharing session: code, Wi-Fi address, private networks, firewall
+    http_server.lua       HTTP server that does not block the interface
+    awake.lua             the device kept awake while sharing, without taking the power button
+    sleep.lua             timers and painting held while the device sleeps
   assets/cards/           fixed art, in two sizes
   assets/screensaver.png  full-screen cover for the sleep screen, 1200x1600
   assets/share/           script and style of the page in the browser
@@ -179,15 +187,20 @@ book_rewind.koplugin/
 - `luajit tests/stable_pages_spec.lua`: the rules for stable page numbers.
 - `luajit tests/themes_spec.lua`: every card has colors and a background in every theme, and text stays readable.
 - `luajit tests/share_spec.lua`: the sharing rules, including attack attempts, and the server with fake connections.
-- `tools/package.sh`: builds the zip and the checksum, only with what the plugin uses.
+- `tools/check.sh`: every check that runs without KOReader (the tests, the texts and the package). The CI runs it, and the release runs `tools/check.sh release`.
+- `luajit tools/check_texts.lua ...`: the same keys and markers in the three languages, no dash and no brand of e-reader in any text, and every key the code asks for. The arguments are in `tools/check.sh`.
+- `tools/package.sh`: builds the zip and the checksum, with `tools/package_lib.sh`.
 - `OUTPUT_DIR=docs/screenshots tools/koreader/run_headless.sh tools/koreader/render_readme_screens.lua`: updates the README images, from the fake history, in English and Portuguese. `share_page.png` is a capture of the page in a browser, taken by hand.
-- `KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py`: draws the icon, the banner and the social preview from those images. It needs Pillow. With `screensaver` as argument it draws `assets/screensaver.png` instead, in the same style.
+- `KOREADER_DIR=<desktop KOReader> python3 -I tools/make_brand_art.py`: draws the icon, the banners and the social previews from those images, in English and in Portuguese (`_pt`, from `docs/screenshots/pt/`). It needs Pillow. With `screensaver` as argument it draws `assets/screensaver.png` instead, in the same style.
 - With `KOREADER_DIR` pointing to a desktop KOReader:
-  - `tools/koreader/run_emulator.sh` opens a window with a fake history, generated by `tools/koreader/fake_history.lua`, in `.ko-home/`. It has eight years with reading, one per reader profile, with a gap year so the comeback after years shows up, and scenes that make each of the 17 wildcards appear in some year. The reading is invented, over real titles.
+  - `tools/koreader/run_emulator.sh` opens a window with a fake history, created once by `tools/koreader/prepare_emulator.sh`, generated by `tools/koreader/fake_history.lua`, in `.ko-home/`. It has eight years with reading, one per reader profile, with a gap year so the comeback after years shows up, and scenes that make each of the 17 wildcards appear in some year. The reading is invented, over real titles.
   - `OUTPUT_DIR=<folder> tools/koreader/run_headless.sh tools/koreader/check_marked_books.lua` checks books marked as finished with KOReader's own history and book settings: a book whose statistics were reset (with both date formats), a book read in part before a reset, and the ones that stay out (finished in the statistics, marked before the year, below 90%, still being read, finished in an earlier year, KOReader's quick start guide). It saves the books card, the timeline and their share layers.
   - `tools/koreader/run_headless.sh tools/koreader/check_stable_pages.lua` checks stable page numbers with KOReader's own history and book settings: next to the book, in the hash folder, turned off, for the book open now and for a history entry from before the year.
   - `OUTPUT_DIR=<folder> tools/koreader/run_headless.sh tools/koreader/check_screensaver.lua` checks when the plugin cover replaces the sleep screen image, on the cards and on the share screen, and saves the resulting screen.
   - `tools/koreader/check_all_sizes.sh` checks every card at four screen sizes, plus little reading, a single session, a missing or empty database, a book read across two years, a year in progress, a corrupted cover, keys, the 8 profiles and the 17 wildcards of the fake history, the transparent layers and rotation.
+  - `tools/koreader/run_headless.sh tools/koreader/fuzz_ui.lua` sends random touches through the cards in the three languages, an empty year and the share screen, which gets an address it refuses, so no page is ever served. `ACTIONS`, `SEED` and `ONLY` repeat an error.
+  - `tools/koreader/run_headless.sh tools/koreader/check_rotation.lua` opens each full-screen window in landscape and checks portrait and the rotation given back; `tools/koreader/rotation_cases.lua` has the fields of the share screen.
+  - `tools/koreader/run_headless.sh tools/koreader/check_lan.lua`, `check_awake.lua` and `check_sleep.lua` check the sharing session, the awake mode and the windows while the device sleeps; `tools/koreader/sleep_cases.lua` opens the share screen with its timer running.
   - `RUN_SECONDS=600 READY_FILE=<file> tools/koreader/run_headless.sh tools/koreader/demo_share.lua` serves the share page with the fake history, approving the first device, and writes the address to that file.
 
 In the `kindle` project, `tools/book_rewind/swap_stats.sh install|restore|status <ip>` swaps the device's statistics for the fake history, keeping the real database, and undoes the swap. It refuses to run with KOReader open. While the swap lasts, reading done on the device goes to the fake database and is lost on restore.
@@ -199,5 +212,5 @@ Code under GPL-3.0, version 3 only. Art and texts under CC BY-NC-SA 4.0, to prev
 ## How to publish a version
 
 1. Update `version` in `_meta.lua` and create the version's section in `CHANGELOG.md`, in the `## [1.2.3]` format.
-2. Run the tests and `tools/koreader/check_all_sizes.sh`, and test on a device, including **Share**.
-3. Publish the `v1.2.3` release on GitHub, creating the tag with it, after the push. The `release.yml` workflow checks that the tag matches `_meta.lua`, runs the tests and attaches the zip and the checksum to the release.
+2. Run `tools/check.sh`, `tools/koreader/check_all_sizes.sh`, `fuzz_ui.lua` and the other checks above, and test on a device, including **Share**.
+3. Publish the `v1.2.3` release on GitHub, creating the tag with it, after the push. The `release.yml` workflow checks that the tag matches `_meta.lua`, runs `tools/check.sh release` and attaches every zip in `dist/` with its checksum to the release.
